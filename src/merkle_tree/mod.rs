@@ -1,5 +1,10 @@
 extern crate blake3;
 
+use std::rc::Rc;
+use std::cell::RefCell;
+
+type Link<T> = Rc<RefCell<T>>;
+
 #[derive(Debug, Default)]
 pub struct LeafNode {
   key: Vec<u8>,
@@ -9,39 +14,31 @@ pub struct LeafNode {
 
 #[derive(Debug, Default)]
 pub struct CommitedInnerNode {
-  left: Option<Box<TreeNode>>,
-  right: Option<Box<TreeNode>>
+  left: Option<Link<TreeNode>>,
+  right: Option<Link<TreeNode>>
 }
 
 #[derive(Debug, Default)]
 pub struct UncommitedInnerNode {
-  old: Box<CommitedInnerNode>,
-  new: Box<CommitedInnerNode>,
+  old: Link<TreeNode>,
+  new: Link<TreeNode>,
 }
 
 impl UncommitedInnerNode {
-  fn get_left(&self) -> Option<&Box<TreeNode>> {
-    self.new.left.as_ref()
-  }
-
-  fn get_left_mut(&mut self) -> Option<&mut Box<TreeNode>> {
-    self.new.left.as_mut()
+  fn get_left(&self) -> Option<Link<TreeNode>> {
+    self.new.borrow().get_left().as_ref().map(|rc| rc.clone())
   }
 
   fn set_left(&mut self, node: TreeNode) {
-    self.new.left = Some(Box::new(node));
+    self.new.borrow_mut().set_left(node);
   }
 
-  fn get_right(&self) -> Option<&Box<TreeNode>> {
-    self.new.right.as_ref()
-  }
-
-  fn get_right_mut(&mut self) -> Option<&mut Box<TreeNode>> {
-    self.new.right.as_mut()
+  fn get_right(&self) -> Option<Link<TreeNode>> {
+    self.new.borrow().get_right().as_ref().map(|rc| rc.clone())
   }
 
   fn set_right(&mut self, node: TreeNode) {
-    self.new.right = Some(Box::new(node));
+    self.new.borrow_mut().set_right(node);
   }
 }
 
@@ -54,49 +51,33 @@ pub enum InnerNode {
 }
 
 impl InnerNode {
-  fn get_left(&self) -> Option<&Box<TreeNode>> {
+  fn get_left(&self) -> Option<Link<TreeNode>> {
     match self {
-      InnerNode::CommitedInnerNode(inner) => inner.left.as_ref(),
+      InnerNode::CommitedInnerNode(inner) => inner.left.as_ref().map(|rc| rc.clone()),
       InnerNode::UncommitedInnerNode(inner) => inner.get_left(),
-      InnerNode::None => None
-    }
-  }
-
-  fn get_left_mut(&mut self) -> Option<&mut Box<TreeNode>> {
-    match self {
-      InnerNode::CommitedInnerNode(inner) => inner.left.as_mut(),
-      InnerNode::UncommitedInnerNode(inner) => inner.get_left_mut(),
       InnerNode::None => None
     }
   }
 
   fn set_left(&mut self, node: TreeNode) {
     match self {
-      InnerNode::CommitedInnerNode(inner) => inner.left = Some(Box::new(node)),
+      InnerNode::CommitedInnerNode(inner) => inner.left = Some(Rc::new(RefCell::new(node))),
       InnerNode::UncommitedInnerNode(inner) => inner.set_left(node),
       InnerNode::None => ()
     }
   }
 
-  fn get_right(&self) -> Option<&Box<TreeNode>> {
+  fn get_right(&self) -> Option<Link<TreeNode>> {
     match self {
-      InnerNode::CommitedInnerNode(inner) => inner.right.as_ref(),
+      InnerNode::CommitedInnerNode(inner) => inner.right.as_ref().map(|rc| rc.clone()),
       InnerNode::UncommitedInnerNode(inner) => inner.get_right(),
-      InnerNode::None => None
-    }
-  }
-
-  fn get_right_mut(&mut self) -> Option<&mut Box<TreeNode>> {
-    match self {
-      InnerNode::CommitedInnerNode(inner) => inner.right.as_mut(),
-      InnerNode::UncommitedInnerNode(inner) => inner.get_right_mut(),
       InnerNode::None => None
     }
   }
 
   fn set_right(&mut self, node: TreeNode) {
     match self {
-      InnerNode::CommitedInnerNode(inner) => inner.right = Some(Box::new(node)),
+      InnerNode::CommitedInnerNode(inner) => inner.right = Some(Rc::new(RefCell::new(node))),
       InnerNode::UncommitedInnerNode(inner) => inner.set_right(node),
       InnerNode::None => ()
     }
@@ -126,7 +107,7 @@ impl Data {
         result.clone_from_slice(blake3::hash(&value_data).as_bytes());
         result
       },
-      Data::TreeData(tree) => tree.root_node.hash(),
+      Data::TreeData(tree) => tree.root_node.borrow().hash(),
       Data::SecondaryIndexData(index_data) => {
         let mut result = [0; 32];
         result.clone_from_slice(index_data);
@@ -148,11 +129,11 @@ impl TreeNode {
       TreeNode::InnerNode(inner) => {
         match inner.get_right() {
           Some(right) => {
-            hasher.update(&inner.get_left().unwrap().hash());
-            hasher.update(&right.hash());
+            hasher.update(&inner.get_left().unwrap().borrow().hash());
+            hasher.update(&right.borrow().hash());
           },
           None => {
-            hasher.update(&inner.get_left().unwrap().hash());
+            hasher.update(&inner.get_left().unwrap().borrow().hash());
           }
         }
       },
@@ -164,18 +145,10 @@ impl TreeNode {
     result
   }
 
-  fn get_left(&self) -> Option<&Box<TreeNode>> {
+  fn get_left(&self) -> Option<Link<TreeNode>> {
     match self {
       TreeNode::LeafNode(_) => None,
       TreeNode::InnerNode(inner) => inner.get_left(),
-      TreeNode::None => None,
-    }
-  }
-
-  fn get_left_mut(&mut self) -> Option<&mut Box<TreeNode>> {
-    match self {
-      TreeNode::LeafNode(_) => None,
-      TreeNode::InnerNode(inner) => inner.get_left_mut(),
       TreeNode::None => None,
     }
   }
@@ -188,7 +161,7 @@ impl TreeNode {
     }
   }
 
-  fn get_right(&self) -> Option<&Box<TreeNode>> {
+  fn get_right(&self) -> Option<Link<TreeNode>> {
     match self {
       TreeNode::LeafNode(_) => None,
       TreeNode::InnerNode(inner) => inner.get_right(),
@@ -196,11 +169,11 @@ impl TreeNode {
     }
   }
 
-  fn get_right_mut(&mut self) -> Option<&mut Box<TreeNode>> {
+  fn set_right(&mut self, node: TreeNode) {
     match self {
-      TreeNode::LeafNode(_) => None,
-      TreeNode::InnerNode(inner) => inner.get_right_mut(),
-      TreeNode::None =>  None,
+      TreeNode::LeafNode(_) => (),
+      TreeNode::InnerNode(inner) => inner.set_right(node),
+      TreeNode::None => (),
     }
   }
 
@@ -225,15 +198,19 @@ impl TreeNode {
       return 0;
     }
 
-    fn find_bottom(node_option: Option<&Box<TreeNode>>, counter: u64) -> (Option<&Box<TreeNode>>, u64) {
+    fn find_bottom(node_option: Option<Link<TreeNode>>, counter: u64) -> (Option<Link<TreeNode>>, u64) {
       if node_option.is_none() {
         return (None, counter)
       }
 
-      let node = node_option.unwrap();
+      let node_rc = node_option.as_ref().map(|rc| rc.clone()).unwrap();
+
+      let node = node_rc.borrow();
+
+      let clone = node_option.as_ref().map(|rc| rc.clone());
 
       if node.is_leaf_node() {
-        return (node_option, counter);
+        return (clone, counter);
       }
 
       find_bottom(node.get_left(), counter + 1)
@@ -245,7 +222,7 @@ impl TreeNode {
 
 #[derive(Debug)]
 pub struct MerkleTree {
-  root_node: Box<TreeNode>,
+  root_node: Link<TreeNode>,
 }
 
 impl MerkleTree {
@@ -267,7 +244,7 @@ impl MerkleTree {
     let root_node = MerkleTree::build_root_node(leaf_nodes);
 
     MerkleTree {
-      root_node: Box::new(root_node),
+      root_node: Rc::new(RefCell::new(root_node)),
     }
   }
 
@@ -280,8 +257,8 @@ impl MerkleTree {
 
       let node = TreeNode::InnerNode(
         InnerNode::CommitedInnerNode(CommitedInnerNode {
-          left: Some(Box::new(left_node)),
-          right: nodes.pop().map(|leaf_node| Box::new(leaf_node)),
+          left: Some(Rc::new(RefCell::new(left_node))),
+          right: nodes.pop().map(|leaf_node| Rc::new(RefCell::new(leaf_node))),
         })
       );
 
@@ -295,39 +272,45 @@ impl MerkleTree {
     }
   }
 
-  fn find_incomplete<'a>(&'a mut self) -> Option<&'a mut Box<TreeNode>> {
-    if self.root_node.get_right().is_none() {
-      return Some(&mut self.root_node)
+  fn find_incomplete(&self) -> Option<Link<TreeNode>> {
+    if self.root_node.borrow().get_right().is_none() {
+      return Some(self.root_node.clone());
     }
 
-    fn find(node_option: Option<&mut Box<TreeNode>>) -> Option<&mut Box<TreeNode>> {
+    fn find(node_option: Option<Link<TreeNode>>) -> Option<Link<TreeNode>> {
       if node_option.is_none() {
         return None;
       }
 
-      let node = node_option.unwrap();
+      let node_rc = node_option.as_ref().map(|rc| rc.clone()).unwrap();
+
+      let node = node_rc.borrow();
+
+      let clone = node_option.as_ref().map(|rc| rc.clone());
 
       if node.is_leaf_node() {
         return None;
       }
 
       if node.get_right().is_none() {
-        return Some(node);
+        return clone;
       }
 
-      find(node.get_right_mut())
+      find(node.get_right())
     }
 
-    find(self.root_node.get_right_mut())
+    find(self.root_node.borrow().get_right())
   }
 
   pub fn get_height(&self) -> u64 {
-    fn find_bottom(node_option: Option<&Box<TreeNode>>, counter: u64) -> (Option<&Box<TreeNode>>, u64) {
+    fn find_bottom(node_option: Option<Link<TreeNode>>, counter: u64) -> (Option<Link<TreeNode>>, u64) {
       if node_option.is_none() {
         return (None, counter)
       }
 
-      let node = node_option.unwrap();
+      let rc = node_option.as_ref().map(|rc| rc.clone()).unwrap();
+
+      let node = rc.borrow();
 
       if node.is_leaf_node() {
         return (node_option, counter);
@@ -336,14 +319,14 @@ impl MerkleTree {
       find_bottom(node.get_left(), counter + 1)
     }
 
-    find_bottom(Some(&self.root_node), 0).1
+    find_bottom(Some(self.root_node.clone()), 0).1
   }
 
   pub fn insert(&mut self, key: Vec<u8>, value: Data) -> Result<(), &'static str> {
     let result = self.find_incomplete();
 
     match result {
-      Some(node) => match node.as_mut() {
+      Some(node) => match &mut *node.borrow_mut() {
         TreeNode::InnerNode(inner) => {
           let new_node = TreeNode::LeafNode(
             LeafNode {
@@ -376,53 +359,189 @@ impl MerkleTree {
           }
 
           let top = TreeNode::InnerNode(InnerNode::CommitedInnerNode(CommitedInnerNode {
-            left: Some(Box::new(inner_node)),
+            left: Some(Rc::new(RefCell::new(inner_node))),
             right: None,
           }));
 
           construct_new_chain(top, counter - 1)
         }
 
-        let mut new_right = construct_new_chain(
-          TreeNode::InnerNode(InnerNode::CommitedInnerNode(CommitedInnerNode { left: None, right: None })),
+        let new_right = construct_new_chain(
+          TreeNode::InnerNode(InnerNode::CommitedInnerNode(CommitedInnerNode {
+            left: Some(Rc::new(RefCell::new(leaf_node))),
+            right: None
+          })),
           tree_height
         );
 
-        new_right.set_left(leaf_node);
-
-        self.root_node = Box::new(TreeNode::InnerNode(InnerNode::CommitedInnerNode(CommitedInnerNode {
+        self.root_node = Rc::new(RefCell::new(TreeNode::InnerNode(InnerNode::CommitedInnerNode(CommitedInnerNode {
           left: Some(old_root),
-          right: Some(Box::new(new_right)),
-        })));
+          right: Some(Rc::new(RefCell::new(new_right))),
+        }))));
 
         Ok(())
       },
     }
   }
 
-  pub fn insert_tx(&mut self, key: Vec<u8>, value: Data) {
+  pub fn insert_tx(self, key: Vec<u8>, value: Data) -> MerkleTree {
     let result = self.find_incomplete();
 
-    // TODO: create chains and change some of inner nodes to Uncommited
+    match result {
+      Some(node) => {
+        let tree_height = self.get_height();
+
+        let old_root = self.root_node;
+
+        fn construct_new_chain(inner_node: TreeNode, counter: u64) -> TreeNode {
+          if counter == 0 {
+            return inner_node;
+          }
+
+          let top = TreeNode::InnerNode(InnerNode::CommitedInnerNode(CommitedInnerNode {
+            left: Some(Rc::new(RefCell::new(inner_node))),
+            right: None,
+          }));
+
+          construct_new_chain(top, counter - 1)
+        }
+
+        let leaf_node = TreeNode::LeafNode(LeafNode {
+          key,
+          value_hash: value.hash(),
+          value: Some(value),
+        });
+
+        let old_left_leaf = node.borrow().get_left();
+
+        let last_shadow_inner_node = TreeNode::InnerNode(InnerNode::CommitedInnerNode(CommitedInnerNode {
+          left: old_left_leaf.clone(),
+          right: Some(Rc::new(RefCell::new(leaf_node))),
+        }));
+
+        let last_shadow_node = TreeNode::InnerNode(InnerNode::UncommitedInnerNode(UncommitedInnerNode {
+          old: node.clone(),
+          new: Rc::new(RefCell::new(last_shadow_inner_node)),
+        }));
+
+        let new_right = construct_new_chain(
+          last_shadow_node,
+          tree_height
+        );
+
+        let new_root = TreeNode::InnerNode(InnerNode::CommitedInnerNode(CommitedInnerNode {
+          left: Some(old_root.clone()),
+          right: Some(Rc::new(RefCell::new(new_right))),
+        }));
+
+        let root_node = TreeNode::InnerNode(InnerNode::UncommitedInnerNode(UncommitedInnerNode {
+          old: old_root.clone(),
+          new: Rc::new(RefCell::new(new_root)),
+        }));
+
+        MerkleTree {
+          root_node: Rc::new(RefCell::new(root_node)),
+        }
+      },
+      None => {
+        let tree_height = self.get_height();
+
+        let old_root = self.root_node;
+
+        fn construct_new_chain(inner_node: TreeNode, counter: u64) -> TreeNode {
+          if counter == 0 {
+            return inner_node;
+          }
+
+          let top = TreeNode::InnerNode(InnerNode::CommitedInnerNode(CommitedInnerNode {
+            left: Some(Rc::new(RefCell::new(inner_node))),
+            right: None,
+          }));
+
+          construct_new_chain(top, counter - 1)
+        }
+
+        let leaf_node = TreeNode::LeafNode(LeafNode {
+          key,
+          value_hash: value.hash(),
+          value: Some(value),
+        });
+
+        let new_right = construct_new_chain(
+          TreeNode::InnerNode(InnerNode::CommitedInnerNode(CommitedInnerNode {
+            left: Some(Rc::new(RefCell::new(leaf_node))),
+            right: None
+          })),
+          tree_height
+        );
+
+        let new_root = TreeNode::InnerNode(InnerNode::CommitedInnerNode(CommitedInnerNode {
+          left: Some(old_root.clone()),
+          right: Some(Rc::new(RefCell::new(new_right))),
+        }));
+
+        let root_node = TreeNode::InnerNode(InnerNode::UncommitedInnerNode(UncommitedInnerNode {
+          old: old_root.clone(),
+          new: Rc::new(RefCell::new(new_root)),
+        }));
+
+        MerkleTree {
+          root_node: Rc::new(RefCell::new(root_node)),
+        }
+      }
+    }
+  }
+
+  pub fn rollback(self) -> MerkleTree {
+    match &*self.root_node.clone().borrow() {
+      TreeNode::InnerNode(inner) => match inner {
+        InnerNode::UncommitedInnerNode(uncommited) => {
+          MerkleTree {
+            root_node: uncommited.old.clone(),
+          }
+        },
+        InnerNode::CommitedInnerNode(_) => self,
+        InnerNode::None => self,
+      },
+      TreeNode::LeafNode(_) => self,
+      TreeNode::None => self,
+    }
+  }
+
+  pub fn commit(self) -> MerkleTree {
+    // TODO: make commit
+    self
   }
 }
 
 #[test]
 fn t1() {
-  let mut imbalanced_tree = MerkleTree::new(vec!(
+  use super::hex_slice::hex_slice::HexDisplayExt;
+
+  let imbalanced_tree = MerkleTree::new(vec!(
     (vec!(1, 2, 3), Data::ValueData(vec!(4, 5, 6))),
     (vec!(10, 20, 30), Data::ValueData(vec!(40, 50, 60))),
-    (vec!(100, 200, 201), Data::SecondaryIndexData([0; 32])),
+    (vec!(100, 200, 201), Data::SecondaryIndexData([1; 32])),
   ));
 
-  // checking we have nothing to the right
-  assert_eq!(imbalanced_tree.root_node.get_right().unwrap().get_right().is_none(), true);
+  // // checking we have nothing to the right
+  // assert_eq!(imbalanced_tree.root_node.borrow().get_right().unwrap().borrow().get_right().is_none(), true);
 
-  imbalanced_tree.insert(vec!(0, 0, 0), Data::ValueData(vec!(0, 0, 0))).unwrap();
+  // imbalanced_tree.insert(vec!(0, 0, 0), Data::ValueData(vec!(0, 0, 0))).unwrap();
 
-  assert_eq!(imbalanced_tree.root_node.get_right().unwrap().get_right().is_none(), false);
+  // assert_eq!(imbalanced_tree.root_node.borrow().get_right().unwrap().borrow().get_right().is_none(), false);
 
-  let node = imbalanced_tree.root_node.get_right().unwrap().get_right().unwrap();
+  // let node = imbalanced_tree.root_node.borrow().get_right().unwrap().borrow().get_right().unwrap();
 
-  assert!(matches!(node.get_value().unwrap(), Data::ValueData(_)));
+  // assert!(matches!(node.borrow().get_value().unwrap(), Data::ValueData(_)));
+
+  println!("hash: {}", imbalanced_tree.root_node.borrow().hash().as_ref().hex_slice());
+
+  let uncommited = imbalanced_tree.insert_tx(vec!(0, 9, 0), Data::ValueData(vec!(0, 9, 0)));
+
+  println!("hash: {}", uncommited.root_node.borrow().hash().as_ref().hex_slice());
+
+  let rolled_back = uncommited.rollback();
+
+  println!("hash: {}", rolled_back.root_node.borrow().hash().as_ref().hex_slice());
 }
