@@ -67,6 +67,14 @@ impl InnerNode {
     }
   }
 
+  fn set_left_link(&mut self, link: Link<TreeNode>) {
+    match self {
+      InnerNode::CommitedInnerNode(inner) => inner.left = Some(link),
+      InnerNode::UncommitedInnerNode(inner) => (),
+      InnerNode::None => ()
+    }
+  }
+
   fn get_right(&self) -> Option<Link<TreeNode>> {
     match self {
       InnerNode::CommitedInnerNode(inner) => inner.right.as_ref().map(|rc| rc.clone()),
@@ -79,6 +87,14 @@ impl InnerNode {
     match self {
       InnerNode::CommitedInnerNode(inner) => inner.right = Some(Rc::new(RefCell::new(node))),
       InnerNode::UncommitedInnerNode(inner) => inner.set_right(node),
+      InnerNode::None => ()
+    }
+  }
+
+  fn set_right_link(&mut self, link: Link<TreeNode>) {
+    match self {
+      InnerNode::CommitedInnerNode(inner) => inner.right = Some(link),
+      InnerNode::UncommitedInnerNode(inner) => (),
       InnerNode::None => ()
     }
   }
@@ -161,6 +177,14 @@ impl TreeNode {
     }
   }
 
+  fn set_left_link(&mut self, link: Link<TreeNode>) {
+    match self {
+      TreeNode::LeafNode(_) => (),
+      TreeNode::InnerNode(inner) => inner.set_left_link(link),
+      TreeNode::None => (),
+    }
+  }
+
   fn get_right(&self) -> Option<Link<TreeNode>> {
     match self {
       TreeNode::LeafNode(_) => None,
@@ -173,6 +197,14 @@ impl TreeNode {
     match self {
       TreeNode::LeafNode(_) => (),
       TreeNode::InnerNode(inner) => inner.set_right(node),
+      TreeNode::None => (),
+    }
+  }
+
+  fn set_right_link(&mut self, link: Link<TreeNode>) {
+    match self {
+      TreeNode::LeafNode(_) => (),
+      TreeNode::InnerNode(inner) => inner.set_right_link(link),
       TreeNode::None => (),
     }
   }
@@ -509,8 +541,54 @@ impl MerkleTree {
   }
 
   pub fn commit(self) -> MerkleTree {
-    // TODO: make commit
-    self
+    fn relink(node: Link<TreeNode>) -> Link<TreeNode> {
+      match &*node.borrow_mut() {
+        TreeNode::InnerNode(inner) => match inner {
+          InnerNode::UncommitedInnerNode(uncommited) => {
+            let new_node = uncommited.new.clone();
+
+            let old_right = new_node.borrow().get_right();
+
+            let new_right = match old_right.as_ref() {
+              Some(right) => match &*right.clone().borrow() {
+                TreeNode::InnerNode(inner) => match inner {
+                  InnerNode::UncommitedInnerNode(_) => Some(relink(old_right.unwrap().clone())),
+                  _ => old_right,
+                },
+                _ => old_right,
+              },
+              None => old_right,
+            };
+
+            let old_left = new_node.borrow().get_left();
+
+            let new_left = match old_left.as_ref() {
+              Some(left) => match &*left.clone().borrow() {
+                TreeNode::InnerNode(inner) => match inner {
+                  InnerNode::UncommitedInnerNode(_) => Some(relink(old_left.unwrap().clone())),
+                  _ => old_left,
+                },
+                _ => old_left,
+              },
+              None => old_left,
+            };
+
+            new_node.borrow_mut().set_left_link(new_left.unwrap());
+            new_node.borrow_mut().set_right_link(new_right.unwrap());
+
+            new_node
+          },
+          _ => node.clone()
+        },
+        _ => node.clone()
+      }
+    }
+
+    let root_node = relink(self.root_node);
+
+    MerkleTree {
+      root_node,
+    }
   }
 }
 
@@ -539,9 +617,13 @@ fn t1() {
 
   let uncommited = imbalanced_tree.insert_tx(vec!(0, 9, 0), Data::ValueData(vec!(0, 9, 0)));
 
-  println!("hash: {}", uncommited.root_node.borrow().hash().as_ref().hex_slice());
+  let commited = uncommited.commit();
 
-  let rolled_back = uncommited.rollback();
+  dbg!(&commited);
 
-  println!("hash: {}", rolled_back.root_node.borrow().hash().as_ref().hex_slice());
+  // println!("hash: {}", uncommited.root_node.borrow().hash().as_ref().hex_slice());
+
+  // let rolled_back = uncommited.rollback();
+
+  // println!("hash: {}", rolled_back.root_node.borrow().hash().as_ref().hex_slice());
 }
