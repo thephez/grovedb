@@ -21,6 +21,16 @@ macro_rules! new_commited_node {
   };
 }
 
+macro_rules! check_tree_commited {
+  ($self: ident) => {
+    if let TreeNode::InnerNode(inner) = &*$self.root_node.borrow() {
+      if let InnerNode::UncommitedInnerNode(_) = inner {
+        return Err("you cannot insert into uncomitted tree directly")
+      }
+    }
+  };
+}
+
 #[derive(Default)]
 pub struct LeafNode {
   key: Vec<u8>,
@@ -447,6 +457,8 @@ impl MerkleTree {
   }
 
   pub fn insert(&mut self, key: Vec<u8>, value: Data) -> Result<(), &'static str> {
+    check_tree_commited!(self);
+
     let result = self.find_incomplete();
 
     match result {
@@ -567,46 +579,23 @@ impl MerkleTree {
         }
       },
       None => {
+        let tree_height = self.get_height();
+
         let old_root = self.root_node;
 
-        fn walk_down(mut node: TreeNode, leaf_node: TreeNode) -> TreeNode {
-          let maybe_right = node.get_old_right();
-
-          match maybe_right {
-            Some(old_right) => {
-              let new_node = new_commited_node!(
-                old_right.borrow().get_left().clone(),
-                None
-              );
-
-              let uncommited_new_node = new_uncommited_node!(
-                old_right.clone(),
-                Rc::new(RefCell::new(new_node))
-              );
-
-              let updated_unn = walk_down(uncommited_new_node, leaf_node);
-
-              node.set_right(updated_unn);
-
-              node
-            },
-            None => {
-              node.set_right(leaf_node);
-
-              node
-            }
+        fn build_branch(node: TreeNode, counter: u64) -> TreeNode {
+          if counter == 0 {
+            return node;
           }
+
+          build_branch(
+            new_commited_node!(
+              Some(Rc::new(RefCell::new(node))),
+              None
+            ),
+            counter - 1
+          )
         }
-
-        let new_root = new_commited_node!(
-          old_root.borrow().get_left().clone(),
-          None
-        );
-
-        let uncommited_root_node = new_uncommited_node!(
-          old_root.clone(),
-          Rc::new(RefCell::new(new_root))
-        );
 
         let leaf_node = TreeNode::LeafNode(LeafNode {
           key,
@@ -614,10 +603,26 @@ impl MerkleTree {
           value: Some(value),
         });
 
-        let root_node = walk_down(uncommited_root_node, leaf_node);
+        let new_right = build_branch(
+          new_commited_node!(
+            Some(Rc::new(RefCell::new(leaf_node))),
+            None
+          ),
+          tree_height - 1,
+        );
+
+        let new_root_inner = new_commited_node!(
+          Some(old_root.clone()),
+          Some(Rc::new(RefCell::new(new_right)))
+        );
+
+        let new_root = new_uncommited_node!(
+          old_root.clone(),
+          Rc::new(RefCell::new(new_root_inner))
+        );
 
         MerkleTree {
-          root_node: Rc::new(RefCell::new(root_node)),
+          root_node: Rc::new(RefCell::new(new_root)),
         }
       }
     }
@@ -699,6 +704,7 @@ fn t1() {
     (vec!(1, 2, 3), Data::ValueData(vec!(4, 5, 6))),
     (vec!(10, 20, 30), Data::ValueData(vec!(40, 50, 60))),
     (vec!(100, 200, 201), Data::SecondaryIndexData([1; 32])),
+    (vec!(200, 200, 200), Data::SecondaryIndexData([2; 32])),
   ));
 
   // // checking we have nothing to the right
@@ -717,6 +723,8 @@ fn t1() {
   let uncommited = imbalanced_tree.insert_tx(vec!(0, 9, 0), Data::ValueData(vec!(0, 9, 0)));
 
   // dbg!(&uncommited);
+
+  // uncommited.insert(vec!(0, 9, 0), Data::ValueData(vec!(0, 9, 0))).unwrap();
 
   let commited = uncommited.commit();
 
