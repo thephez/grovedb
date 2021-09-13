@@ -1,24 +1,100 @@
 extern crate blake3;
 
+use std::fmt;
+
+use super::hex_slice::hex_slice::HexDisplayExt;
+
 use std::rc::Rc;
 use std::cell::RefCell;
 
 type Link<T> = Rc<RefCell<T>>;
 
-#[derive(Debug, Default)]
+macro_rules! new_uncommited_node {
+  ($old:expr, $new:expr) => {
+    TreeNode::InnerNode(InnerNode::UncommitedInnerNode(UncommitedInnerNode { old: $old, new: $new }))
+  };
+}
+
+macro_rules! new_commited_node {
+  ($left:expr, $right:expr) => {
+    TreeNode::InnerNode(InnerNode::CommitedInnerNode(CommitedInnerNode { left: $left, right: $right }))
+  };
+}
+
+#[derive(Default)]
 pub struct LeafNode {
   key: Vec<u8>,
   value_hash: [u8; 32],
   value: Option<Data>,
 }
 
-#[derive(Debug, Default)]
+impl fmt::Debug for LeafNode {
+  fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+    let mut hasher = blake3::Hasher::new();
+
+    hasher.update(&self.key);
+    hasher.update(&self.value_hash);
+
+    let mut result = [0; 32];
+    result.clone_from_slice(hasher.finalize().as_bytes());
+
+    formatter.write_str(&format!("LeafNode: {}", result.hex_slice()))
+  }
+}
+
+impl fmt::Debug for CommitedInnerNode {
+  fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+    formatter.debug_struct("CommitedNode")
+      .field("left", &self.left.as_ref().map(|val| val.borrow()))
+      .field("right", &self.right.as_ref().map(|val| val.borrow()))
+      .finish()
+  }
+}
+
+impl fmt::Debug for UncommitedInnerNode {
+  fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+    formatter.debug_struct("UncommitedNode")
+      .field("old", &"some link to old data")
+      .field("new", &self.new.borrow())
+      .finish()
+  }
+}
+
+impl fmt::Debug for InnerNode {
+  fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match self {
+      InnerNode::UncommitedInnerNode(uncommited) => {
+        formatter.debug_struct("").field("uncommited", &uncommited).finish()
+      },
+      InnerNode::CommitedInnerNode(commited) => {
+        formatter.debug_struct("").field("commited", &commited).finish()
+      },
+      InnerNode::None => formatter.write_str("None")
+    }
+  }
+}
+
+impl fmt::Debug for TreeNode {
+  fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+    match self {
+      TreeNode::InnerNode(inner) => {
+        formatter.debug_struct("InnerNode").field("inner", &inner).finish()
+      },
+      TreeNode::LeafNode(leaf) => {
+        formatter.debug_struct("LeafNode").field("leaf", &leaf).finish()
+      },
+      TreeNode::None => formatter.write_str("None")
+    }
+  }
+}
+
+#[derive(Default)]
 pub struct CommitedInnerNode {
   left: Option<Link<TreeNode>>,
   right: Option<Link<TreeNode>>
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct UncommitedInnerNode {
   old: Link<TreeNode>,
   new: Link<TreeNode>,
@@ -42,7 +118,7 @@ impl UncommitedInnerNode {
   }
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub enum InnerNode {
   CommitedInnerNode(CommitedInnerNode),
   UncommitedInnerNode(UncommitedInnerNode),
@@ -83,6 +159,14 @@ impl InnerNode {
     }
   }
 
+  fn get_old_right(&self) -> Option<Link<TreeNode>> {
+    match self {
+      InnerNode::CommitedInnerNode(inner) => inner.right.as_ref().map(|rc| rc.clone()),
+      InnerNode::UncommitedInnerNode(inner) => inner.old.borrow().get_right(),
+      InnerNode::None => None
+    }
+  }
+
   fn set_right(&mut self, node: TreeNode) {
     match self {
       InnerNode::CommitedInnerNode(inner) => inner.right = Some(Rc::new(RefCell::new(node))),
@@ -100,7 +184,7 @@ impl InnerNode {
   }
 }
 
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub enum TreeNode {
   LeafNode(LeafNode),
   InnerNode(InnerNode),
@@ -189,6 +273,14 @@ impl TreeNode {
     match self {
       TreeNode::LeafNode(_) => None,
       TreeNode::InnerNode(inner) => inner.get_right(),
+      TreeNode::None => None,
+    }
+  }
+
+  fn get_old_right(&self) -> Option<Link<TreeNode>> {
+    match self {
+      TreeNode::LeafNode(_) => None,
+      TreeNode::InnerNode(inner) => inner.get_old_right(),
       TreeNode::None => None,
     }
   }
@@ -476,22 +568,46 @@ impl MerkleTree {
         }
       },
       None => {
-        let tree_height = self.get_height();
-
         let old_root = self.root_node;
 
-        fn construct_new_chain(inner_node: TreeNode, counter: u64) -> TreeNode {
-          if counter == 0 {
-            return inner_node;
+        fn walk_down(mut node: TreeNode, leaf_node: TreeNode) -> TreeNode {
+          let maybe_right = node.get_old_right();
+
+          match maybe_right {
+            Some(old_right) => {
+              let new_node = new_commited_node!(
+                old_right.borrow().get_left().clone(),
+                None
+              );
+
+              let uncommited_new_node = new_uncommited_node!(
+                old_right.clone(),
+                Rc::new(RefCell::new(new_node))
+              );
+
+              let updated_unn = walk_down(uncommited_new_node, leaf_node);
+
+              node.set_right(updated_unn);
+
+              node
+            },
+            None => {
+              node.set_right(leaf_node);
+
+              node
+            }
           }
-
-          let top = TreeNode::InnerNode(InnerNode::CommitedInnerNode(CommitedInnerNode {
-            left: Some(Rc::new(RefCell::new(inner_node))),
-            right: None,
-          }));
-
-          construct_new_chain(top, counter - 1)
         }
+
+        let new_root = new_commited_node!(
+          old_root.borrow().get_left().clone(),
+          None
+        );
+
+        let uncommited_root_node = new_uncommited_node!(
+          old_root.clone(),
+          Rc::new(RefCell::new(new_root))
+        );
 
         let leaf_node = TreeNode::LeafNode(LeafNode {
           key,
@@ -499,23 +615,7 @@ impl MerkleTree {
           value: Some(value),
         });
 
-        let new_right = construct_new_chain(
-          TreeNode::InnerNode(InnerNode::CommitedInnerNode(CommitedInnerNode {
-            left: Some(Rc::new(RefCell::new(leaf_node))),
-            right: None
-          })),
-          tree_height
-        );
-
-        let new_root = TreeNode::InnerNode(InnerNode::CommitedInnerNode(CommitedInnerNode {
-          left: Some(old_root.clone()),
-          right: Some(Rc::new(RefCell::new(new_right))),
-        }));
-
-        let root_node = TreeNode::InnerNode(InnerNode::UncommitedInnerNode(UncommitedInnerNode {
-          old: old_root.clone(),
-          new: Rc::new(RefCell::new(new_root)),
-        }));
+        let root_node = walk_down(uncommited_root_node, leaf_node);
 
         MerkleTree {
           root_node: Rc::new(RefCell::new(root_node)),
@@ -547,7 +647,26 @@ impl MerkleTree {
           InnerNode::UncommitedInnerNode(uncommited) => {
             let new_node = uncommited.new.clone();
 
+            let old_left = new_node.borrow().get_left();
+
+            // dbg!(&old_left);
+
+            let new_left = match old_left.as_ref() {
+              Some(left) => match &*left.clone().borrow() {
+                TreeNode::InnerNode(inner) => match inner {
+                  InnerNode::UncommitedInnerNode(_) => Some(relink(old_left.unwrap().clone())),
+                  _ => old_left,
+                },
+                _ => old_left,
+              },
+              None => old_left,
+            };
+
+            // dbg!(&new_left);
+
             let old_right = new_node.borrow().get_right();
+
+            dbg!(&old_right);
 
             let new_right = match old_right.as_ref() {
               Some(right) => match &*right.clone().borrow() {
@@ -560,18 +679,7 @@ impl MerkleTree {
               None => old_right,
             };
 
-            let old_left = new_node.borrow().get_left();
-
-            let new_left = match old_left.as_ref() {
-              Some(left) => match &*left.clone().borrow() {
-                TreeNode::InnerNode(inner) => match inner {
-                  InnerNode::UncommitedInnerNode(_) => Some(relink(old_left.unwrap().clone())),
-                  _ => old_left,
-                },
-                _ => old_left,
-              },
-              None => old_left,
-            };
+            dbg!(&new_right);
 
             new_node.borrow_mut().set_left_link(new_left.unwrap());
             new_node.borrow_mut().set_right_link(new_right.unwrap());
@@ -613,9 +721,11 @@ fn t1() {
 
   // assert!(matches!(node.borrow().get_value().unwrap(), Data::ValueData(_)));
 
-  println!("hash: {}", imbalanced_tree.root_node.borrow().hash().as_ref().hex_slice());
+  // println!("hash: {}", imbalanced_tree.root_node.borrow().hash().as_ref().hex_slice());
 
   let uncommited = imbalanced_tree.insert_tx(vec!(0, 9, 0), Data::ValueData(vec!(0, 9, 0)));
+
+  // dbg!(&uncommited);
 
   let commited = uncommited.commit();
 
