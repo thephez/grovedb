@@ -512,23 +512,47 @@ impl MerkleTree {
     let result = self.find_incomplete();
 
     match result {
-      Some(node) => {
-        let tree_height = self.get_height();
-
+      Some(_) => {
         let old_root = self.root_node;
 
-        fn construct_new_chain(inner_node: TreeNode, counter: u64) -> TreeNode {
-          if counter == 0 {
-            return inner_node;
+        fn walk_down(mut node: TreeNode, leaf_node: TreeNode) -> TreeNode {
+          let maybe_right = node.get_old_right();
+
+          match maybe_right {
+            Some(old_right) => {
+              let new_node = new_commited_node!(
+                old_right.borrow().get_left().clone(),
+                None
+              );
+
+              let uncommited_new_node = new_uncommited_node!(
+                old_right.clone(),
+                Rc::new(RefCell::new(new_node))
+              );
+
+              let updated_unn = walk_down(uncommited_new_node, leaf_node);
+
+              node.set_right(updated_unn);
+
+              node
+            },
+            None => {
+              node.set_right(leaf_node);
+
+              node
+            }
           }
-
-          let top = TreeNode::InnerNode(InnerNode::CommitedInnerNode(CommitedInnerNode {
-            left: Some(Rc::new(RefCell::new(inner_node))),
-            right: None,
-          }));
-
-          construct_new_chain(top, counter - 1)
         }
+
+        let new_root = new_commited_node!(
+          old_root.borrow().get_left().clone(),
+          None
+        );
+
+        let uncommited_root_node = new_uncommited_node!(
+          old_root.clone(),
+          Rc::new(RefCell::new(new_root))
+        );
 
         let leaf_node = TreeNode::LeafNode(LeafNode {
           key,
@@ -536,32 +560,7 @@ impl MerkleTree {
           value: Some(value),
         });
 
-        let old_left_leaf = node.borrow().get_left();
-
-        let last_shadow_inner_node = TreeNode::InnerNode(InnerNode::CommitedInnerNode(CommitedInnerNode {
-          left: old_left_leaf.clone(),
-          right: Some(Rc::new(RefCell::new(leaf_node))),
-        }));
-
-        let last_shadow_node = TreeNode::InnerNode(InnerNode::UncommitedInnerNode(UncommitedInnerNode {
-          old: node.clone(),
-          new: Rc::new(RefCell::new(last_shadow_inner_node)),
-        }));
-
-        let new_right = construct_new_chain(
-          last_shadow_node,
-          tree_height
-        );
-
-        let new_root = TreeNode::InnerNode(InnerNode::CommitedInnerNode(CommitedInnerNode {
-          left: Some(old_root.clone()),
-          right: Some(Rc::new(RefCell::new(new_right))),
-        }));
-
-        let root_node = TreeNode::InnerNode(InnerNode::UncommitedInnerNode(UncommitedInnerNode {
-          old: old_root.clone(),
-          new: Rc::new(RefCell::new(new_root)),
-        }));
+        let root_node = walk_down(uncommited_root_node, leaf_node);
 
         MerkleTree {
           root_node: Rc::new(RefCell::new(root_node)),
@@ -642,14 +641,12 @@ impl MerkleTree {
 
   pub fn commit(self) -> MerkleTree {
     fn relink(node: Link<TreeNode>) -> Link<TreeNode> {
-      match &*node.borrow_mut() {
+      match &*node.borrow() {
         TreeNode::InnerNode(inner) => match inner {
           InnerNode::UncommitedInnerNode(uncommited) => {
             let new_node = uncommited.new.clone();
 
             let old_left = new_node.borrow().get_left();
-
-            // dbg!(&old_left);
 
             let new_left = match old_left.as_ref() {
               Some(left) => match &*left.clone().borrow() {
@@ -662,11 +659,7 @@ impl MerkleTree {
               None => old_left,
             };
 
-            // dbg!(&new_left);
-
             let old_right = new_node.borrow().get_right();
-
-            dbg!(&old_right);
 
             let new_right = match old_right.as_ref() {
               Some(right) => match &*right.clone().borrow() {
@@ -678,8 +671,6 @@ impl MerkleTree {
               },
               None => old_right,
             };
-
-            dbg!(&new_right);
 
             new_node.borrow_mut().set_left_link(new_left.unwrap());
             new_node.borrow_mut().set_right_link(new_right.unwrap());
