@@ -629,18 +629,22 @@ impl MerkleTree {
   }
 
   pub fn rollback(self) -> MerkleTree {
-    match &*self.root_node.clone().borrow() {
-      TreeNode::InnerNode(inner) => match inner {
-        InnerNode::UncommitedInnerNode(uncommited) => {
-          MerkleTree {
-            root_node: uncommited.old.clone(),
-          }
+    fn get_lowest_commited(node: Link<TreeNode>) -> Link<TreeNode> {
+      match &*node.borrow() {
+        TreeNode::InnerNode(inner) => match inner {
+          InnerNode::UncommitedInnerNode(uncommited) => {
+            get_lowest_commited(uncommited.old.clone())
+          },
+          _ => node.clone(),
         },
-        InnerNode::CommitedInnerNode(_) => self,
-        InnerNode::None => self,
-      },
-      TreeNode::LeafNode(_) => self,
-      TreeNode::None => self,
+        _ => node.clone()
+      }
+    }
+
+    let old_root = get_lowest_commited(self.root_node);
+
+    MerkleTree {
+      root_node: old_root,
     }
   }
 
@@ -721,18 +725,22 @@ fn t1() {
   // println!("hash: {}", imbalanced_tree.root_node.borrow().hash().as_ref().hex_slice());
 
   let uncommited = imbalanced_tree.insert_tx(vec!(0, 9, 0), Data::ValueData(vec!(0, 9, 0)));
+  let uncommited2 = uncommited.insert_tx(vec!(0, 9, 0), Data::ValueData(vec!(0, 9, 0)));
+
 
   // dbg!(&uncommited);
 
   // uncommited.insert(vec!(0, 9, 0), Data::ValueData(vec!(0, 9, 0))).unwrap();
 
-  let commited = uncommited.commit();
+  // let commited = uncommited.commit();
 
-  dbg!(&commited);
+  // dbg!(&commited);
 
   // println!("hash: {}", uncommited.root_node.borrow().hash().as_ref().hex_slice());
 
-  // let rolled_back = uncommited.rollback();
+  let rolled_back = uncommited2.rollback();
+
+  dbg!(&rolled_back);
 
   // println!("hash: {}", rolled_back.root_node.borrow().hash().as_ref().hex_slice());
 }
