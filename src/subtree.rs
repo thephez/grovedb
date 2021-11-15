@@ -74,7 +74,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_success_insert() {
+    fn test_success_insert_get() {
         let tmp_dir = TempDir::new("db").unwrap();
         let mut merk = Merk::open(tmp_dir.path()).unwrap();
         Element::Tree
