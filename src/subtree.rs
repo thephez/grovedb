@@ -29,14 +29,21 @@ impl Element {
     }
 
     /// Recursively follow `Element::Reference`
-    fn follow_reference(self, merk: &Merk) -> Result<Element, Error> {
+    fn follow_reference(self, merk: &Merk, paths: &mut Vec<Vec<u8>>) -> Result<Element, Error> {
         if let Element::Reference(reference_merk_key) = self {
+            // Check if the reference merk key has been visted before
+            // if it has then we have a cylce <return an error>
+            if paths.contains(&reference_merk_key) {
+                return Err(Error::CyclicReferencePath);
+            }
             let element = Element::decode(
                 merk.get(reference_merk_key.as_slice())?
                     .ok_or(Error::InvalidPath("key not found in Merk"))?
                     .as_slice(),
             )?;
-            element.follow_reference(merk)
+
+            paths.push(reference_merk_key);
+            element.follow_reference(merk, paths)
         } else {
             Ok(self)
         }
@@ -72,7 +79,9 @@ impl Element {
                 .ok_or(Error::InvalidPath("key not found in Merk"))?
                 .as_slice(),
         )?;
-        element.follow_reference(&merk)
+
+        let mut reference_paths: Vec<Vec<u8>> = Vec::new();
+        element.follow_reference(&merk, &mut reference_paths)
     }
 
     pub fn insert(&self, merk: &mut Merk, path: &[&[u8]], key: &[u8]) -> Result<(), Error> {
@@ -159,7 +168,8 @@ mod tests {
             .insert(&mut merk, &[b"tree-key"], b"reference-2")
             .expect("expected successful reference insertion");
 
-        let val = Element::get(&merk, &[b"tree-key"], b"reference-1").expect("bam");
-        dbg!(val);
+        assert!(
+            Element::get(&merk, &[b"tree-key"], b"reference-1").is_err(),
+        );
     }
 }
