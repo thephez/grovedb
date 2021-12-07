@@ -2,6 +2,7 @@
 mod subtree;
 #[cfg(test)]
 mod tests;
+mod transaction;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -12,6 +13,7 @@ use std::{
 use merk::{self, rocksdb, Merk};
 use rs_merkle::{algorithms::Sha256, MerkleTree};
 use subtree::Element;
+use crate::transaction::Transaction;
 
 /// Limit of possible indirections
 const MAX_REFERENCE_HOPS: usize = 10;
@@ -230,6 +232,14 @@ impl GroveDb {
         }
         Err(Error::ReferenceLimit)
     }
+
+    /// Begins new db transaction
+    ///
+    /// Multiple transactions can run concurrently, but they should be committed
+    /// sequentially, i.e. the next commit should start only when the previous one
+    /// has finished. There should be a transaction queue.
+    ///
+    pub fn begin_transaction(&self) -> Transaction { Transaction::new(&self) }
 
     pub fn proof(&self) -> ! {
         todo!()
