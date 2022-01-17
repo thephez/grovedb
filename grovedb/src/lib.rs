@@ -218,6 +218,10 @@ impl GroveDb {
         ))
     }
 
+    pub fn size(&self) -> usize {
+        self.subtrees.len()
+    }
+
     // TODO: Checkpoints are currently not implemented for the transactional DB
     // pub fn checkpoint<P: AsRef<Path>>(&self, path: P) -> Result<GroveDb, Error> {
     //     // let snapshot = self.db.transaction().snapshot();
