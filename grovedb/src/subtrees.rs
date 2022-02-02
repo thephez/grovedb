@@ -1,5 +1,10 @@
 //! Module for retrieving subtrees
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    rc::Rc,
+    sync::{Arc, Mutex, RwLock},
+};
 
 use merk::Merk;
 use storage::{
@@ -12,8 +17,8 @@ use crate::{Element, Error, GroveDb};
 // TODO: should take temp_root_leaf_keys also
 pub struct Subtrees<'a> {
     pub root_leaf_keys: &'a HashMap<Vec<u8>, usize>,
-    pub temp_subtrees: &'a RefCell<HashMap<Vec<u8>, Merk<PrefixedRocksDbStorage>>>,
-    pub storage: Rc<storage::rocksdb_storage::OptimisticTransactionDB>,
+    pub temp_subtrees: &'a RwLock<HashMap<Vec<u8>, Merk<PrefixedRocksDbStorage>>>,
+    pub storage: Arc<storage::rocksdb_storage::OptimisticTransactionDB>,
 }
 
 impl Subtrees<'_> {
@@ -30,7 +35,10 @@ impl Subtrees<'_> {
             None => None,
             Some(_) => {
                 let prefix = GroveDb::compress_subtree_key(path, None);
-                self.temp_subtrees.borrow_mut().insert(prefix, merk)
+                self.temp_subtrees
+                    .write()
+                    .expect("`RwLock` is poisoned")
+                    .insert(prefix, merk)
             }
         }
     }
@@ -43,7 +51,11 @@ impl Subtrees<'_> {
     ) -> Option<Merk<PrefixedRocksDbStorage>> {
         match transaction {
             None => None,
-            Some(_) => self.temp_subtrees.borrow_mut().insert(prefix, merk),
+            Some(_) => self
+                .temp_subtrees
+                .write()
+                .expect("`RwLock` is poisoned`")
+                .insert(prefix, merk),
         }
     }
 
@@ -66,11 +78,10 @@ impl Subtrees<'_> {
                 let iter = path.into_iter();
                 let tree_prefix = GroveDb::compress_subtree_key(iter.clone(), None);
                 prefix = Some(tree_prefix.clone());
-                if self.temp_subtrees.borrow().contains_key(&tree_prefix) {
+                let mut temp_subtrees = self.temp_subtrees.write().expect("`RwLock is poisoned`");
+                if temp_subtrees.contains_key(&tree_prefix) {
                     // get the merk out
-                    merk = self
-                        .temp_subtrees
-                        .borrow_mut()
+                    merk = temp_subtrees
                         .remove(&tree_prefix)
                         .expect("confirmed it's in the hashmap");
                 } else {

@@ -1,6 +1,7 @@
 use std::{
     ops::{Deref, DerefMut},
     rc::Rc,
+    sync::Arc,
 };
 
 use storage::rocksdb_storage::{default_rocksdb, PrefixedRocksDbStorage};
@@ -12,7 +13,7 @@ use crate::Merk;
 pub struct TempMerk {
     pub inner: Merk<PrefixedRocksDbStorage>,
     pub path: TempDir,
-    _db: Rc<rocksdb::OptimisticTransactionDB>,
+    _db: Arc<rocksdb::OptimisticTransactionDB>,
 }
 
 impl TempMerk {

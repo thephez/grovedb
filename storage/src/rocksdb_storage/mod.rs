@@ -1,5 +1,5 @@
 //! Storage implementation using RocksDB
-use std::{path::Path, rc::Rc};
+use std::{path::Path, rc::Rc, sync::Arc};
 
 pub use rocksdb::{checkpoint::Checkpoint, Error, OptimisticTransactionDB};
 use rocksdb::{ColumnFamilyDescriptor, DBRawIterator, DBRawIteratorWithThreadMode};
@@ -45,8 +45,8 @@ pub fn column_families() -> Vec<ColumnFamilyDescriptor> {
 }
 
 /// Create RocksDB with default settings
-pub fn default_rocksdb(path: &Path) -> Rc<rocksdb::OptimisticTransactionDB> {
-    Rc::new(
+pub fn default_rocksdb(path: &Path) -> Arc<rocksdb::OptimisticTransactionDB> {
+    Arc::new(
         rocksdb::OptimisticTransactionDB::open_cf_descriptors(
             &default_db_opts(),
             &path,

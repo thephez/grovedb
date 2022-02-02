@@ -10,7 +10,7 @@ exclude = ["index.node"]
 crate-type = ["cdylib"]
 
 [dependencies]
-grovedb = { path = "../grovedb" }
+node-grove-common = { path = "../node-grove-common" }
 
 [dependencies.neon]
 version = "0.9"

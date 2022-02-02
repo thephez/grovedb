@@ -4,7 +4,13 @@ mod subtrees;
 #[cfg(test)]
 mod tests;
 
-use std::{cell::RefCell, collections::HashMap, path::Path, rc::Rc};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    path::Path,
+    rc::Rc,
+    sync::{Arc, Mutex, RwLock},
+};
 
 pub use merk::proofs::{query::QueryItem, Query};
 use merk::{self, Merk};
@@ -100,13 +106,13 @@ pub struct GroveDb {
     root_tree: MerkleTree<Sha256>,
     root_leaf_keys: HashMap<Vec<u8>, usize>,
     meta_storage: PrefixedRocksDbStorage,
-    db: Rc<storage::rocksdb_storage::OptimisticTransactionDB>,
+    db: Arc<storage::rocksdb_storage::OptimisticTransactionDB>,
     // Locks the database for writes during the transaction
     is_readonly: bool,
     // Temp trees used for writes during transaction
     temp_root_tree: MerkleTree<Sha256>,
     temp_root_leaf_keys: HashMap<Vec<u8>, usize>,
-    temp_subtrees: RefCell<HashMap<Vec<u8>, Merk<PrefixedRocksDbStorage>>>,
+    temp_subtrees: RwLock<HashMap<Vec<u8>, Merk<PrefixedRocksDbStorage>>>,
 }
 
 impl GroveDb {
@@ -114,7 +120,7 @@ impl GroveDb {
         root_tree: MerkleTree<Sha256>,
         root_leaf_keys: HashMap<Vec<u8>, usize>,
         meta_storage: PrefixedRocksDbStorage,
-        db: Rc<storage::rocksdb_storage::OptimisticTransactionDB>,
+        db: Arc<storage::rocksdb_storage::OptimisticTransactionDB>,
     ) -> Self {
         Self {
             root_tree,
@@ -123,13 +129,13 @@ impl GroveDb {
             db,
             temp_root_tree: MerkleTree::new(),
             temp_root_leaf_keys: HashMap::new(),
-            temp_subtrees: RefCell::new(HashMap::new()),
+            temp_subtrees: RwLock::new(HashMap::new()),
             is_readonly: false,
         }
     }
 
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, Error> {
-        let db = Rc::new(
+        let db = Arc::new(
             storage::rocksdb_storage::OptimisticTransactionDB::open_cf_descriptors(
                 &storage::rocksdb_storage::default_db_opts(),
                 path,
@@ -150,8 +156,8 @@ impl GroveDb {
             HashMap::new()
         };
 
-        let temp_subtrees: RefCell<HashMap<Vec<u8>, Merk<PrefixedRocksDbStorage>>> =
-            RefCell::new(HashMap::new());
+        let temp_subtrees: RwLock<HashMap<Vec<u8>, Merk<PrefixedRocksDbStorage>>> =
+            RwLock::new(HashMap::new());
         let subtrees_view = Subtrees {
             root_leaf_keys: &root_leaf_keys,
             temp_subtrees: &temp_subtrees,
@@ -299,7 +305,7 @@ impl GroveDb {
     /// Returns a clone of reference counter to the underlying db storage.
     /// Useful when working with transactions. For more details, please
     /// refer to the [`GroveDb::start_transaction`] examples section.
-    pub fn storage(&self) -> Rc<storage::rocksdb_storage::OptimisticTransactionDB> {
+    pub fn storage(&self) -> Arc<storage::rocksdb_storage::OptimisticTransactionDB> {
         self.db.clone()
     }
 
@@ -398,7 +404,7 @@ impl GroveDb {
         // Cloning all the trees to maintain to rollback transactional changes
         self.temp_root_tree = self.root_tree.clone();
         self.temp_root_leaf_keys = self.root_leaf_keys.clone();
-        self.temp_subtrees = RefCell::new(HashMap::new());
+        self.temp_subtrees = RwLock::new(HashMap::new());
 
         Ok(db_transaction
             .rollback()
@@ -426,6 +432,6 @@ impl GroveDb {
         // Free transactional data
         self.temp_root_tree = MerkleTree::new();
         self.temp_root_leaf_keys = HashMap::new();
-        self.temp_subtrees = RefCell::new(HashMap::new());
+        self.temp_subtrees = RwLock::new(HashMap::new());
     }
 }

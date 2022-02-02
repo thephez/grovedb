@@ -1,7 +1,7 @@
 pub mod chunks;
 // TODO
 // pub mod restore;
-use std::{cell::Cell, cmp::Ordering, collections::LinkedList};
+use std::{cell::Cell, cmp::Ordering, collections::LinkedList, sync::RwLock};
 
 use anyhow::{anyhow, bail, Result};
 use storage::{self, rocksdb_storage::PrefixedRocksDbStorage, Batch, RawIterator, Storage, Store};
@@ -18,7 +18,7 @@ pub struct Merk<S>
 where
     S: Storage,
 {
-    pub(crate) tree: Cell<Option<Tree>>,
+    pub(crate) tree: RwLock<Option<Tree>>,
     pub(crate) storage: S,
 }
 
@@ -30,7 +30,7 @@ where
 {
     pub fn open(storage: S) -> Result<Merk<S>> {
         let mut merk = Merk {
-            tree: Cell::new(None),
+            tree: RwLock::new(None),
             storage,
         };
         merk.load_root()?;
@@ -50,7 +50,7 @@ where
             iter.next();
         }
         self.storage.commit_batch(to_delete)?;
-        self.tree.set(None);
+        *self.tree.write().expect("`RwLock` is poisoned") = None;
         Ok(())
     }
 
@@ -199,12 +199,12 @@ where
     {
         let maybe_walker = self
             .tree
-            .take()
+            .write()
+            .expect("todo")
             .take()
             .map(|tree| Walker::new(tree, self.source()));
 
         let (maybe_tree, deleted_keys) = Walker::apply_to(maybe_walker, batch, self.source())?;
-        self.tree.set(maybe_tree);
 
         // commit changes to db
         self.commit(deleted_keys, aux, transaction)
@@ -320,12 +320,11 @@ where
     }
 
     pub fn walk<T>(&self, f: impl FnOnce(Option<RefWalker<MerkSource<S>>>) -> T) -> T {
-        let mut tree = self.tree.take();
+        let mut tree = self.tree.write().expect("todo");
         let maybe_walker = tree
             .as_mut()
             .map(|tree| RefWalker::new(tree, self.source()));
         let res = f(maybe_walker);
-        self.tree.set(tree);
         res
     }
 
@@ -340,16 +339,14 @@ where
     }
 
     fn use_tree<T>(&self, f: impl FnOnce(Option<&Tree>) -> T) -> T {
-        let tree = self.tree.take();
+        let tree = self.tree.read().expect("todo");
         let res = f(tree.as_ref());
-        self.tree.set(tree);
         res
     }
 
     fn use_tree_mut<T>(&self, mut f: impl FnMut(Option<&mut Tree>) -> T) -> T {
-        let mut tree = self.tree.take();
+        let mut tree = self.tree.write().expect("todo");
         let res = f(tree.as_mut());
-        self.tree.set(tree);
         res
     }
 
@@ -360,28 +357,28 @@ where
     pub(crate) fn load_root(&mut self) -> Result<()> {
         if let Some(tree_root_key) = self.storage.get_root(ROOT_KEY_KEY)? {
             let tree = Tree::get(&self.storage, &tree_root_key)?;
-            self.tree = Cell::new(tree);
+            self.tree = RwLock::new(tree);
         }
         Ok(())
     }
 }
 
-impl Clone for Merk<PrefixedRocksDbStorage> {
-    fn clone(&self) -> Self {
-        let tree_clone = match self.tree.take() {
-            None => None,
-            Some(tree) => {
-                let clone = tree.clone();
-                self.tree.set(Some(tree));
-                Some(clone)
-            }
-        };
-        Self {
-            tree: Cell::new(tree_clone),
-            storage: self.storage.clone(),
-        }
-    }
-}
+// impl Clone for Merk<PrefixedRocksDbStorage> {
+//     fn clone(&self) -> Self {
+//         let tree_clone = match self.tree.write().expect("`RwLock` is
+// poisoned").take() {             None => None,
+//             Some(tree) => {
+//                 let clone = tree.clone();
+//                 *self.tree.write().expect("`RwLock` is poisoned") =
+// Some(tree);                 Some(clone)
+//             }
+//         };
+//         Self {
+//             tree: RwLock::new(tree_clone),
+//             storage: self.storage.clone(),
+//         }
+//     }
+// }
 
 // TODO: get rid of Fetch/source and use GroveDB storage abstraction
 #[derive(Debug)]

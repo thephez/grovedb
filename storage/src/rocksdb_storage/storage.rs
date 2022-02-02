@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{rc::Rc, sync::Arc};
 
 use rocksdb::WriteBatchWithTransaction;
 
@@ -17,7 +17,7 @@ use crate::{
 /// RocksDB wrapper to store items with prefixes
 #[derive(Clone)]
 pub struct PrefixedRocksDbStorage {
-    pub(crate) db: Rc<rocksdb::OptimisticTransactionDB>,
+    pub(crate) db: Arc<rocksdb::OptimisticTransactionDB>,
     prefix: Vec<u8>,
 }
 
@@ -32,7 +32,7 @@ pub enum PrefixedRocksDbStorageError {
 impl PrefixedRocksDbStorage {
     /// Wraps RocksDB to prepend prefixes to each operation
     pub fn new(
-        db: Rc<rocksdb::OptimisticTransactionDB>,
+        db: Arc<rocksdb::OptimisticTransactionDB>,
         prefix: Vec<u8>,
     ) -> Result<Self, PrefixedRocksDbStorageError> {
         Ok(PrefixedRocksDbStorage { prefix, db })

@@ -1,6 +1,7 @@
 use std::{
     ops::{Deref, DerefMut},
     rc::Rc,
+    sync::Arc,
 };
 
 use anyhow::Result;
@@ -14,7 +15,7 @@ use crate::Merk;
 pub struct CrashMerk {
     merk: Merk<PrefixedRocksDbStorage>,
     path: Option<TempDir>,
-    _db: Rc<rocksdb::OptimisticTransactionDB>,
+    _db: Arc<rocksdb::OptimisticTransactionDB>,
 }
 
 impl CrashMerk {

@@ -70,6 +70,8 @@ class GroveDB {
    * @returns {Promise<*>}
    */
   async insert(path, key, value, useTransaction = false) {
+    console.log(path, key, value);
+    console.log(this.db);
     return groveDbInsertAsync.call(this.db, path, key, value, useTransaction);
   }
 

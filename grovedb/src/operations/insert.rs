@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::{rc::Rc, sync::Arc};
 
 use storage::{rocksdb_storage, Storage};
 
@@ -7,7 +7,7 @@ use crate::{Element, Error, GroveDb, Merk, PrefixedRocksDbStorage};
 /// A helper function that builds a prefix for a key under a path and opens a
 /// Merk instance.
 fn create_merk_with_prefix<'a, P>(
-    db: Rc<rocksdb_storage::OptimisticTransactionDB>,
+    db: Arc<rocksdb_storage::OptimisticTransactionDB>,
     path: P,
     key: &'a [u8],
 ) -> Result<(Vec<u8>, Merk<PrefixedRocksDbStorage>), Error>
