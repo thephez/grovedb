@@ -34,7 +34,7 @@ pub enum Element {
 pub struct PathQueryPushArgs<'a> {
     pub subtrees: Option<&'a Subtrees<'a>>,
     pub key: Option<&'a [u8]>,
-    pub element: Element,
+    pub element: Option<Element>,
     pub path: Option<&'a [&'a [u8]]>,
     pub subquery_key: Option<Vec<u8>>,
     pub subquery: Option<Query>,
@@ -98,13 +98,15 @@ impl Element {
             offset,
             ..
         } = args;
-        if offset.unwrap_or(0) == 0 {
-            results.push(element);
-            if let Some(limit) = limit {
-                *limit -= 1;
+        if let Some(element) = element {
+            if offset.unwrap_or(0) == 0 {
+                results.push(element);
+                if let Some(limit) = limit {
+                    *limit -= 1;
+                }
+            } else if let Some(offset) = offset {
+                *offset -= 1;
             }
-        } else if let Some(offset) = offset {
-            *offset -= 1;
         }
         Ok(())
     }
@@ -122,94 +124,96 @@ impl Element {
             limit,
             offset,
         } = args;
-        match element {
-            Element::Tree(_) => {
-                if subtrees.is_none() && subquery.is_none() {
-                    return Err(Error::InvalidPath(
-                        "a subtrees_option or a subquery should be provided",
-                    ));
-                }
-                let subtrees = subtrees.ok_or(Error::MissingParameter(
-                    "subtrees must be provided when using a subquery key",
-                ))?;
-                // this means that for each element we should get the element at
-                // the subquery_key or just the directly with the subquery
-                let mut path_vec = path
-                    .ok_or(Error::MissingParameter(
-                        "the path must be provided when using a subquery key",
-                    ))?
-                    .to_vec();
-                path_vec.push(key.ok_or(Error::MissingParameter(
-                    "the key must be provided when using a subquery key",
-                ))?);
-
-                if let Some(subquery) = subquery {
-                    if let Some(subquery_key) = &subquery_key {
-                        path_vec.push(subquery_key.as_slice());
+        if let Some(element) = element {
+            match element {
+                Element::Tree(_) => {
+                    if subtrees.is_none() && subquery.is_none() {
+                        return Err(Error::InvalidPath(
+                            "a subtrees_option or a subquery should be provided",
+                        ));
                     }
+                    let subtrees = subtrees.ok_or(Error::MissingParameter(
+                        "subtrees must be provided when using a subquery key",
+                    ))?;
+                    // this means that for each element we should get the element at
+                    // the subquery_key or just the directly with the subquery
+                    let mut path_vec = path
+                        .ok_or(Error::MissingParameter(
+                            "the path must be provided when using a subquery key",
+                        ))?
+                        .to_vec();
+                    path_vec.push(key.ok_or(Error::MissingParameter(
+                        "the key must be provided when using a subquery key",
+                    ))?);
 
-                    let (inner_merk, prefix) = subtrees
-                        .get(path_vec.iter().copied(), None)
-                        .map_err(|_| Error::InvalidPath("no subtree found under that path"))?;
-
-                    let inner_query = SizedQuery::new(subquery, *limit, *offset);
-                    let path_vec_owned = path_vec.iter().map(|x| x.to_vec()).collect();
-                    let inner_path_query = PathQuery::new(path_vec_owned, inner_query);
-
-                    let (mut sub_elements, skipped) =
-                        Element::get_path_query(&inner_merk, &inner_path_query, Some(subtrees))?;
-
-                    if let Some(prefix) = prefix {
-                        subtrees.insert_temp_tree_with_prefix(prefix, inner_merk, None);
-                    } else {
-                        subtrees.insert_temp_tree(path_vec.iter().copied(), inner_merk, None);
-                    }
-
-                    if let Some(limit) = limit {
-                        *limit -= sub_elements.len() as u16;
-                    }
-                    if let Some(offset) = offset {
-                        *offset -= skipped;
-                    }
-                    results.append(&mut sub_elements);
-                } else if let Some(subquery_key) = subquery_key {
-                    let (inner_merk, prefix) = subtrees
-                        .get(path_vec.iter().copied(), None)
-                        .map_err(|_| Error::InvalidPath("no subtree found under that path"))?;
-                    if offset.unwrap_or(0) == 0 {
-                        results.push(Element::get(&inner_merk, subquery_key.as_slice())?);
-                        if let Some(limit) = limit {
-                            *limit -= 1;
+                    if let Some(subquery) = subquery {
+                        if let Some(subquery_key) = &subquery_key {
+                            path_vec.push(subquery_key.as_slice());
                         }
-                    } else if let Some(offset) = offset {
-                        *offset -= 1;
-                    }
 
-                    if let Some(prefix) = prefix {
-                        subtrees.insert_temp_tree_with_prefix(prefix, inner_merk, None);
+                        let (inner_merk, prefix) = subtrees
+                            .get(path_vec.iter().copied(), None)
+                            .map_err(|_| Error::InvalidPath("no subtree found under that path"))?;
+
+                        let inner_query = SizedQuery::new(subquery, *limit, *offset);
+                        let path_vec_owned = path_vec.iter().map(|x| x.to_vec()).collect();
+                        let inner_path_query = PathQuery::new(path_vec_owned, inner_query);
+
+                        let (mut sub_elements, skipped) =
+                            Element::get_path_query(&inner_merk, &inner_path_query, Some(subtrees))?;
+
+                        if let Some(prefix) = prefix {
+                            subtrees.insert_temp_tree_with_prefix(prefix, inner_merk, None);
+                        } else {
+                            subtrees.insert_temp_tree(path_vec.iter().copied(), inner_merk, None);
+                        }
+
+                        if let Some(limit) = limit {
+                            *limit -= sub_elements.len() as u16;
+                        }
+                        if let Some(offset) = offset {
+                            *offset -= skipped;
+                        }
+                        results.append(&mut sub_elements);
+                    } else if let Some(subquery_key) = subquery_key {
+                        let (inner_merk, prefix) = subtrees
+                            .get(path_vec.iter().copied(), None)
+                            .map_err(|_| Error::InvalidPath("no subtree found under that path"))?;
+                        if offset.unwrap_or(0) == 0 {
+                            results.push(Element::get(&inner_merk, subquery_key.as_slice())?);
+                            if let Some(limit) = limit {
+                                *limit -= 1;
+                            }
+                        } else if let Some(offset) = offset {
+                            *offset -= 1;
+                        }
+
+                        if let Some(prefix) = prefix {
+                            subtrees.insert_temp_tree_with_prefix(prefix, inner_merk, None);
+                        } else {
+                            subtrees.insert_temp_tree(path_vec.iter().copied(), inner_merk, None);
+                        }
                     } else {
-                        subtrees.insert_temp_tree(path_vec.iter().copied(), inner_merk, None);
+                        return Err(Error::InvalidPath(
+                            "you must provide a subquery or a subquery_key when interacting with a \
+                             tree of trees",
+                        ));
                     }
-                } else {
-                    return Err(Error::InvalidPath(
-                        "you must provide a subquery or a subquery_key when interacting with a \
-                         tree of trees",
-                    ));
                 }
-            }
-            _ => {
-                Element::basic_push(PathQueryPushArgs {
-                    subtrees,
-                    key,
-                    element,
-                    path,
-                    subquery_key,
-                    subquery,
-                    left_to_right,
-                    results,
-                    limit,
-                    offset,
-                })?;
+                _ => {
+                    Element::basic_push(PathQueryPushArgs {
+                        subtrees,
+                        key,
+                        element: Some(element),
+                        path,
+                        subquery_key,
+                        subquery,
+                        left_to_right,
+                        results,
+                        limit,
+                        offset,
+                    })?;
+                }
             }
         }
         Ok(())
@@ -236,7 +240,7 @@ impl Element {
                     add_element_function(PathQueryPushArgs {
                         subtrees,
                         key: Some(key.as_slice()),
-                        element: Element::get(merk, key)?,
+                        element: Element::get(merk, key).ok(),
                         path,
                         subquery_key: sized_query.query.subquery_key.clone(),
                         subquery: sized_query
@@ -261,7 +265,7 @@ impl Element {
                     add_element_function(PathQueryPushArgs {
                         subtrees,
                         key: Some(key),
-                        element,
+                        element: Some(element),
                         path,
                         subquery_key: sized_query.query.subquery_key.clone(),
                         subquery: sized_query
