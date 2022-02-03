@@ -2208,3 +2208,32 @@ fn test_root_hash() {
     db.commit_transaction(transaction).unwrap();
     assert_ne!(db.root_hash(None).unwrap(), root_hash_outside.unwrap());
 }
+
+#[test]
+fn test_multiple_transactions_insert() {
+    let mut db = make_grovedb();
+
+    for i in 0..100000 {
+        let storage = db.storage();
+        let transaction = storage.transaction();
+        db.start_transaction().unwrap();
+
+        let i_vec = (i as u32).to_be_bytes().to_vec();
+        db.insert([TEST_LEAF], &i_vec.clone(), Element::Item(i_vec.clone()), Some(&transaction)).expect("successful subtree insert");
+        let m = db.get([TEST_LEAF], &i_vec.clone(), Some(&transaction)).unwrap();
+        dbg!(&m);
+        assert_eq!(m, Element::Item(i_vec.clone()));
+        // db.insert([TEST_LEAF], &i_vec, Element::empty_tree(), None)
+        //     .expect("successful subtree insert");
+        //
+        // db.insert(
+        //     [TEST_LEAF, &i_vec.clone()],
+        //     b"\0",
+        //     Element::Item(i_vec),
+        //     None,
+        // )
+        //     .expect("successful value insert");
+        db.commit_transaction(transaction).unwrap();
+    }
+
+}
