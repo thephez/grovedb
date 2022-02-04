@@ -1156,6 +1156,73 @@ fn test_subtree_deletion_if_empty() {
     let element = Element::Item(b"value".to_vec());
     let mut db = make_grovedb();
 
+    // Insert some nested subtrees
+    db.insert(
+        [TEST_LEAF],
+        b"level1-A",
+        Element::empty_tree(),
+        None,
+    )
+        .expect("successful subtree insert A on level 1");
+    db.insert(
+        [TEST_LEAF, b"level1-A"],
+        b"level2-A",
+        Element::empty_tree(),
+        None,
+    )
+        .expect("successful subtree insert A on level 2");
+    db.insert(
+        [TEST_LEAF, b"level1-A"],
+        b"level2-B",
+        Element::empty_tree(),
+        None,
+    )
+        .expect("successful subtree insert B on level 2");
+    // Insert an element into subtree
+    db.insert(
+        [TEST_LEAF, b"level1-A", b"level2-A"],
+        b"level3-A",
+        element,
+        None,
+    )
+        .expect("successful value insert");
+    db.insert(
+        [TEST_LEAF],
+        b"level1-B",
+        Element::empty_tree(),
+        None,
+    )
+        .expect("successful subtree insert B on level 1");
+
+    // Currently we have:
+    // Level 1:            A
+    //                    / \
+    // Level 2:          A   B
+    //                   |
+    // Level 3:          A: value
+
+    let root_hash = db.root_tree.root().unwrap();
+    let deleted = db
+        .delete_if_empty_tree([TEST_LEAF], b"level1-A", None)
+        .expect("unable to delete subtree");
+    assert_eq!(deleted, false);
+
+    let deleted = db
+        .delete_up_tree_while_empty(
+            [TEST_LEAF, b"level1-A", b"level2-A"],
+            b"level3-A",
+            Some(0),
+            None,
+        )
+        .expect("unable to delete subtree");
+    assert_eq!(deleted, 2);
+}
+
+#[test]
+fn test_subtree_deletion_if_empty_on_transaction() {
+    let element = Element::Item(b"value".to_vec());
+    let mut db = make_grovedb();
+
     db.start_transaction()
         .expect("transaction should be started");
     let storage = db.storage();

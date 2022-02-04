@@ -15,6 +15,10 @@ impl GroveDb {
         <P as IntoIterator>::IntoIter: DoubleEndedIterator + ExactSizeIterator + Clone,
     {
         let mut path_iter = path.into_iter();
+        dbg!(path_iter.len());
+        for a in path_iter.clone() {
+            dbg!(a);
+        }
         if let Some(stop_path_height) = stop_path_height {
             if stop_path_height == path_iter.clone().len() as u16 {
                 return Ok(0 as u16);
@@ -25,9 +29,9 @@ impl GroveDb {
             return Ok(0 as u16);
         }
         let mut delete_count: u16 = 1;
-        if let Some(first) = path_iter.next() {
+        if let Some(last) = path_iter.next_back() {
             let deleted_parent =
-                self.delete_up_tree_while_empty(path_iter, first, stop_path_height, transaction)?;
+                self.delete_up_tree_while_empty(path_iter, last, stop_path_height, transaction)?;
             delete_count += deleted_parent;
         }
         Ok(delete_count)
@@ -86,9 +90,26 @@ impl GroveDb {
             let (mut merk, prefix) = subtrees.get(path_iter.clone(), transaction)?;
 
             if let Element::Tree(_) = element {
-                if merk.is_empty_tree(transaction) {
+                let (mut inner_merk, prefix) =
+                    subtrees.get(path_iter.clone().chain(std::iter::once(key)), transaction)?;
+                if inner_merk.is_empty_tree(transaction) {
                     Element::delete(&mut merk, key.clone(), transaction)?;
+                    // we need to add the merk trees into the hashmap because we will use them for
+                    // querying data
+                    if let Some(prefix) = prefix {
+                        subtrees.insert_temp_tree_with_prefix(prefix, merk, transaction);
+                    } else {
+                        subtrees.insert_temp_tree(path_iter.clone(), merk, transaction);
+                    }
+
                 } else if only_delete_tree_if_empty {
+                    // we need to add the merk trees into the hashmap because we will use them for
+                    // querying data
+                    if let Some(prefix) = prefix {
+                        subtrees.insert_temp_tree_with_prefix(prefix, merk, transaction);
+                    } else {
+                        subtrees.insert_temp_tree(path_iter.clone(), merk, transaction);
+                    }
                     return Ok(false);
                 } else {
                     Element::delete(&mut merk, key.clone(), transaction)?;
@@ -124,6 +145,14 @@ impl GroveDb {
                 }
             } else {
                 Element::delete(&mut merk, key.clone(), transaction)?;
+
+                // we need to add the merk trees into the hashmap because we will use them for
+                // querying data
+                if let Some(prefix) = prefix {
+                    subtrees.insert_temp_tree_with_prefix(prefix, merk, transaction);
+                } else {
+                    subtrees.insert_temp_tree(path_iter.clone(), merk, transaction);
+                }
             }
             self.propagate_changes(path_iter, transaction)?;
             Ok(true)
