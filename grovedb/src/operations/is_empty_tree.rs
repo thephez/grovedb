@@ -20,6 +20,6 @@ impl GroveDb {
     {
         let (merk, _) = self.get_subtrees().get(path, transaction)?;
 
-        Ok(merk.is_empty_tree())
+        Ok(merk.is_empty_tree(transaction))
     }
 }
