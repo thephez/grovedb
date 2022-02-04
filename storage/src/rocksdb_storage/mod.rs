@@ -28,6 +28,7 @@ pub fn default_db_opts() -> rocksdb::Options {
     opts.set_allow_mmap_reads(true);
     opts.create_missing_column_families(true);
     opts.set_atomic_flush(true);
+    println!("setting the new log dir");
     opts.set_db_log_dir(Path::new("./Users/madab/Documents/projects/test_logs"));
     opts
 }
