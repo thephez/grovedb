@@ -4,7 +4,11 @@
 
 use bincode::Options;
 use integer_encoding::VarInt;
-use merk::{proofs::{query::QueryItem, Query}, tree::Tree, Op, HASH_LENGTH};
+use merk::{
+    proofs::{query::QueryItem, Query},
+    tree::Tree,
+    Op, HASH_LENGTH,
+};
 use serde::{Deserialize, Serialize};
 use storage::{rocksdb_storage::RocksDbStorage, RawIterator, StorageContext};
 
@@ -61,7 +65,7 @@ impl Element {
             Element::Tree(_) => 32,
         }
     }
-    
+
     pub fn required_item_space(len: usize) -> usize {
         len + len.required_space() + 1
     }

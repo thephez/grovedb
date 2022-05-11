@@ -12,7 +12,7 @@ impl GroveDb {
         key: &'p [u8],
         stop_path_height: Option<u16>,
         transaction: TransactionArg,
-    ) -> Result<u16, Error>
+    ) -> Result<(u16, usize), Error>
     where
         P: IntoIterator<Item = &'p [u8]>,
         <P as IntoIterator>::IntoIter: DoubleEndedIterator + ExactSizeIterator + Clone,
@@ -21,19 +21,27 @@ impl GroveDb {
         self.check_subtree_exists_path_not_found(path_iter.clone(), Some(key), transaction)?;
         if let Some(stop_path_height) = stop_path_height {
             if stop_path_height == path_iter.clone().len() as u16 {
-                return Ok(0);
+                return Ok((0, 0));
             }
         }
-        if !self.delete_internal(path_iter.clone(), key, true, transaction)? {
-            return Ok(0);
+        if let Some(mut deleted_size) =
+            self.delete_internal(path_iter.clone(), key, true, transaction)?
+        {
+            let mut delete_count: u16 = 1;
+            if let Some(last) = path_iter.next_back() {
+                let (deleted_parent, deleted_parent_size) = self.delete_up_tree_while_empty(
+                    path_iter,
+                    last,
+                    stop_path_height,
+                    transaction,
+                )?;
+                delete_count += deleted_parent;
+                deleted_size += deleted_parent_size;
+            }
+            Ok((delete_count, deleted_size))
+        } else {
+            Ok((0, 0))
         }
-        let mut delete_count: u16 = 1;
-        if let Some(last) = path_iter.next_back() {
-            let deleted_parent =
-                self.delete_up_tree_while_empty(path_iter, last, stop_path_height, transaction)?;
-            delete_count += deleted_parent;
-        }
-        Ok(delete_count)
     }
 
     pub fn delete<'p, P>(
@@ -55,7 +63,7 @@ impl GroveDb {
         path: P,
         key: &'p [u8],
         transaction: TransactionArg,
-    ) -> Result<bool, Error>
+    ) -> Result<Option<usize>, Error>
     where
         P: IntoIterator<Item = &'p [u8]>,
         <P as IntoIterator>::IntoIter: DoubleEndedIterator + ExactSizeIterator + Clone,
@@ -63,13 +71,14 @@ impl GroveDb {
         self.delete_internal(path, key, true, transaction)
     }
 
+    // Returns the amount of freed up space
     fn delete_internal<'p, P>(
         &self,
         path: P,
         key: &'p [u8],
         only_delete_tree_if_empty: bool,
         transaction: TransactionArg,
-    ) -> Result<bool, Error>
+    ) -> Result<Option<usize>, Error>
     where
         P: IntoIterator<Item = &'p [u8]>,
         <P as IntoIterator>::IntoIter: DoubleEndedIterator + ExactSizeIterator + Clone,
@@ -99,7 +108,7 @@ impl GroveDb {
                     });
 
                 if only_delete_tree_if_empty && !is_empty {
-                    return Ok(false);
+                    return Ok(None);
                 } else {
                     // TODO: dumb traversal should not be tolerated
                     for subtree_path in subtrees_paths {
@@ -124,7 +133,7 @@ impl GroveDb {
                 delete_element()?;
             }
             self.propagate_changes(path_iter, transaction)?;
-            Ok(true)
+            Ok(Some(element.node_byte_size(key.len())))
         }
     }
 

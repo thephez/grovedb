@@ -1141,9 +1141,9 @@ fn test_subtree_deletion_if_empty() {
     let deleted = db
         .delete_if_empty_tree([TEST_LEAF], b"level1-A", Some(&transaction))
         .expect("unable to delete subtree");
-    assert!(!deleted);
+    assert!(!deleted.is_some());
 
-    let deleted = db
+    let (deleted, _) = db
         .delete_up_tree_while_empty(
             [TEST_LEAF, b"level1-A", b"level2-A"],
             b"level3-A",
@@ -1216,9 +1216,9 @@ fn test_subtree_deletion_if_empty_without_transaction() {
     let deleted = db
         .delete_if_empty_tree([TEST_LEAF], b"level1-A", None)
         .expect("unable to delete subtree");
-    assert!(!deleted);
+    assert!(!deleted.is_some());
 
-    let deleted = db
+    let (deleted, size) = db
         .delete_up_tree_while_empty(
             [TEST_LEAF, b"level1-A", b"level2-A"],
             b"level3-A",
@@ -1227,6 +1227,7 @@ fn test_subtree_deletion_if_empty_without_transaction() {
         )
         .expect("unable to delete subtree");
     assert_eq!(deleted, 2);
+    assert!(size > 0);
 
     assert!(matches!(
         db.get([TEST_LEAF, b"level1-A", b"level2-A"], b"level3-A", None,),
