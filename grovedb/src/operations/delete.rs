@@ -49,13 +49,12 @@ impl GroveDb {
         path: P,
         key: &'p [u8],
         transaction: TransactionArg,
-    ) -> Result<(), Error>
+    ) -> Result<Option<usize>, Error>
     where
         P: IntoIterator<Item = &'p [u8]>,
         <P as IntoIterator>::IntoIter: DoubleEndedIterator + ExactSizeIterator + Clone,
     {
-        self.delete_internal(path, key, false, transaction)?;
-        Ok(())
+        self.delete_internal(path, key, false, transaction)
     }
 
     pub fn delete_if_empty_tree<'p, P>(

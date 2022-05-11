@@ -368,12 +368,14 @@ impl GroveDbWrapper {
                 let callback = js_callback.into_inner(&mut task_context);
                 let this = task_context.undefined();
                 let callback_arguments: Vec<Handle<JsValue>> = match result {
-                    Ok(()) => {
-                        vec![task_context.null().upcast()]
-                    }
-
                     // Convert the error to a JavaScript exception on failure
                     Err(err) => vec![task_context.error(err.to_string())?.upcast()],
+                    Ok(None) => {
+                        vec![task_context.number(0).as_value(&mut task_context)]
+                    }
+                    Ok(Some(size)) => {
+                        vec![task_context.number(size as f64).as_value(&mut task_context)]
+                    }
                 };
 
                 callback.call(&mut task_context, this, callback_arguments)?;
