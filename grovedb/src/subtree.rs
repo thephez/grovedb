@@ -66,8 +66,10 @@ impl Element {
         }
     }
 
+    // +1 for enum
+    // +1 for fee multiplier
     pub fn required_item_space(len: usize) -> usize {
-        len + len.required_space() + 1
+        len + len.required_space() + 2
     }
 
     /// Get the size of the serialization of an element in bytes
@@ -87,8 +89,9 @@ impl Element {
                     .sum::<usize>()
                     + path_reference.len().required_space()
                     + 1 // for the enum
+                    + 1 // for the multiplier
             }
-            Element::Tree(_) => 33, // 32 + 1 for enum
+            Element::Tree(_) => 34, // 32 + 1 for enum + 1 for multiplier
         }
     }
 
