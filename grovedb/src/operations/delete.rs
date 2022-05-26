@@ -6,30 +6,55 @@ use crate::{
 };
 
 impl GroveDb {
+    /// Deletes up a tree while the deletion of an element causes the parent tree to be empty
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - The path at which we want to delete the item
+    /// * `key` - The key of the item we wish to delete
+    /// * `stop_path_height` - At what tree depth do we want to want to stop deleting if empty?
+    /// * `transaction` - The database transaction
+    ///
+    /// # Returns
+    /// * u16: number of deleted elements
+    /// * usize: size removed from disk
+    /// * u16: key seeks
+    /// * usize: key size loaded into memory
+
     pub fn delete_up_tree_while_empty<'p, P>(
         &self,
         path: P,
         key: &'p [u8],
         stop_path_height: Option<u16>,
         transaction: TransactionArg,
-    ) -> Result<(u16, usize), Error>
+    ) -> Result<(u16, usize, u16, usize), Error>
     where
         P: IntoIterator<Item = &'p [u8]>,
         <P as IntoIterator>::IntoIter: DoubleEndedIterator + ExactSizeIterator + Clone,
     {
+        let mut key_seeks : u16 = 0;
+        let mut key_size_loaded : usize = 0;
         let mut path_iter = path.into_iter();
+
+        //todo: Not sure we actually need this
         self.check_subtree_exists_path_not_found(path_iter.clone(), Some(key), transaction)?;
+        key_seeks += 1;
+        key_size_loaded += key.len();
+
         if let Some(stop_path_height) = stop_path_height {
             if stop_path_height == path_iter.clone().len() as u16 {
-                return Ok((0, 0));
+                return Ok((0, 0, key_seeks, key_size_loaded));
             }
         }
+
+        key_seeks += 1;
+        key_size_loaded += key.len();
         if let Some(mut deleted_size) =
             self.delete_internal(path_iter.clone(), key, true, transaction)?
         {
             let mut delete_count: u16 = 1;
             if let Some(last) = path_iter.next_back() {
-                let (deleted_parent, deleted_parent_size) = self.delete_up_tree_while_empty(
+                let (deleted_parent, deleted_parent_size, parent_key_seeks, parent_key_size_loaded) = self.delete_up_tree_while_empty(
                     path_iter,
                     last,
                     stop_path_height,
@@ -37,10 +62,13 @@ impl GroveDb {
                 )?;
                 delete_count += deleted_parent;
                 deleted_size += deleted_parent_size;
+                key_seeks += parent_key_seeks;
+                key_size_loaded += parent_key_size_loaded;
             }
-            Ok((delete_count, deleted_size))
+            Ok((delete_count, deleted_size, key_seeks, key_size_loaded))
         } else {
-            Ok((0, 0))
+            // We didn't delete because the tree wasn't empty and we said to only delete if tree was empty
+            Ok((0, 0, key_seeks, key_size_loaded))
         }
     }
 
