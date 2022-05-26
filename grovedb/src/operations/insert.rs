@@ -19,13 +19,31 @@ impl GroveDb {
         <P as IntoIterator>::IntoIter: ExactSizeIterator + DoubleEndedIterator + Clone,
     {
         let path_iter = path.into_iter();
+
         match element {
             Element::Tree(_) => {
                 if path_iter.len() == 0 {
                     self.add_root_leaf(key, transaction)?;
                 } else {
-                    self.add_non_root_subtree(path_iter, key, transaction)?;
+                    self.add_non_root_subtree(path_iter.clone(), key, transaction)?;
+                    self.propagate_changes(path_iter, transaction)?;
                 }
+            }
+            Element::Reference(ref reference_path) => {
+                if path_iter.len() == 0 {
+                    return Err(Error::InvalidPath(
+                        "only subtrees are allowed as root tree's leafs",
+                    ));
+                }
+
+                self.check_subtree_exists_invalid_path(path_iter.clone(), Some(key), transaction)?;
+                let referenced_element =
+                    self.follow_reference(reference_path.to_owned(), transaction)?;
+
+                merk_optional_tx!(self.db, path_iter.clone(), transaction, mut subtree, {
+                    element.insert_reference(&mut subtree, key, referenced_element.serialize()?)?;
+                });
+                self.propagate_changes(path_iter, transaction)?;
             }
             _ => {
                 // If path is empty that means there is an attempt to insert
@@ -33,7 +51,7 @@ impl GroveDb {
                 // but trees
                 if path_iter.len() == 0 {
                     return Err(Error::InvalidPath(
-                        "only subtrees are allowed as root tree's leafs",
+                        "only subtrees are allowed as root tree's leaves",
                     ));
                 }
                 self.check_subtree_exists_invalid_path(path_iter.clone(), Some(key), transaction)?;
@@ -105,7 +123,6 @@ impl GroveDb {
             let element = Element::Tree(child_subtree.root_hash());
             element.insert(&mut parent_subtree, key)?;
         }
-        self.propagate_changes(path_iter, transaction)?;
         Ok(())
     }
 

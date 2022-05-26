@@ -1,9 +1,9 @@
+mod batch;
 mod operations;
 mod subtree;
 #[cfg(test)]
 mod tests;
 mod util;
-#[cfg(feature = "visualize")]
 mod visualize;
 use std::{
     collections::{BTreeMap, HashMap},
@@ -13,20 +13,17 @@ use std::{
 pub use merk::proofs::{query::QueryItem, Query};
 use merk::{self, Merk};
 use rs_merkle::{algorithms::Sha256, MerkleTree};
-use serde::{Deserialize, Serialize};
 pub use storage::{
     rocksdb_storage::{self, RocksDbStorage},
     Storage, StorageContext,
 };
 pub use subtree::Element;
-#[cfg(feature = "visualize")]
-pub use visualize::{visualize_stderr, visualize_stdout, Drawer, Visualize};
 
 use crate::util::{merk_optional_tx, meta_storage_context_optional_tx};
 
 /// A key to store serialized data about subtree prefixes to restore HADS
 /// structure
-/// A key to store serialized data about root tree leafs keys and order
+/// A key to store serialized data about root tree leaves keys and order
 const ROOT_LEAFS_SERIALIZED_KEY: &[u8] = b"rootLeafsSerialized";
 
 #[derive(Debug, thiserror::Error)]
@@ -68,7 +65,7 @@ pub enum Error {
     CorruptedData(String),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PathQuery {
     // TODO: Make generic over path type
     pub path: Vec<Vec<u8>>,
@@ -79,7 +76,7 @@ pub struct PathQuery {
 // limit should be applied to the elements returned by the subquery
 // offset should be applied to the first item that will subqueried (first in the
 // case of a range)
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SizedQuery {
     pub query: Query,
     pub limit: Option<u16>,
@@ -105,14 +102,6 @@ impl PathQuery {
         let query = SizedQuery::new(query, None, None);
         Self { path, query }
     }
-}
-
-#[derive(Serialize, Deserialize)]
-pub struct Proof {
-    query_paths: Vec<Vec<Vec<u8>>>,
-    proofs: HashMap<Vec<u8>, Vec<u8>>,
-    root_proof: Vec<u8>,
-    root_leaf_keys: HashMap<Vec<u8>, usize>,
 }
 
 pub struct GroveDb {
@@ -144,18 +133,18 @@ impl GroveDb {
         Ok(Self::get_root_tree_internal(&self.db, transaction)?.root())
     }
 
-    fn get_root_leaf_keys_internal<'db, 'ctx, S>(
+    fn get_root_leaf_keys_internal<'db, S>(
         meta_storage: &S,
     ) -> Result<BTreeMap<Vec<u8>, usize>, Error>
     where
-        S: StorageContext<'db, 'ctx>,
-        Error: From<<S as StorageContext<'db, 'ctx>>::Error>,
+        S: StorageContext<'db>,
+        Error: From<<S as StorageContext<'db>>::Error>,
     {
         let root_leaf_keys: BTreeMap<Vec<u8>, usize> = if let Some(root_leaf_keys_serialized) =
             meta_storage.get_meta(ROOT_LEAFS_SERIALIZED_KEY)?
         {
             bincode::deserialize(&root_leaf_keys_serialized).map_err(|_| {
-                Error::CorruptedData(String::from("unable to deserialize root leafs"))
+                Error::CorruptedData(String::from("unable to deserialize root leaves"))
             })?
         } else {
             BTreeMap::new()
