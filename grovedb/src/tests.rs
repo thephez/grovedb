@@ -3430,7 +3430,7 @@ fn test_check_subtree_exists_function() {
     db.insert(
         [TEST_LEAF],
         b"key_scalar",
-        Element::Item(b"ayy".to_vec()),
+        Element::new_item(b"ayy".to_vec()),
         None,
     )
     .expect("cannot insert item");
@@ -3455,4 +3455,24 @@ fn test_check_subtree_exists_function() {
         db.check_subtree_exists_invalid_path([TEST_LEAF, b"key_scalar"], None),
         Err(Error::InvalidPath(_))
     ));
+}
+
+#[test]
+fn test_path_query_print() {
+    let db = make_grovedb();
+    populate_tree_for_non_unique_range_subquery(&db);
+
+    let path = vec![TEST_LEAF.to_vec()];
+    let mut query = Query::new();
+    query.insert_range_to_inclusive(..=1995_u32.to_be_bytes().to_vec());
+
+    let subquery_key: Vec<u8> = b"\0".to_vec();
+    let mut subquery = Query::new();
+    subquery.insert_all();
+
+    query.set_subquery_key(subquery_key);
+    query.set_subquery(subquery);
+
+    let path_query = PathQuery::new_unsized(path, query.clone());
+    println!("{:?}", path_query);
 }

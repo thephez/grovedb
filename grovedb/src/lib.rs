@@ -5,10 +5,8 @@ mod subtree;
 mod tests;
 mod util;
 mod visualize;
-use std::{
-    collections::{BTreeMap, HashMap},
-    path::Path,
-};
+use std::{collections::{BTreeMap, HashMap}, fmt, path::Path};
+use std::string::FromUtf8Error;
 
 pub use merk::proofs::{query::QueryItem, Query};
 use merk::{self, Merk};
@@ -65,22 +63,49 @@ pub enum Error {
     CorruptedData(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct PathQuery {
     // TODO: Make generic over path type
     path: Vec<Vec<u8>>,
     query: SizedQuery,
 }
 
+impl fmt::Debug for PathQuery {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(f, "PathQuery {{\n  Path {{")?;
+        for (i, path_element) in self.path.iter().enumerate() {
+            match String::from_utf8(path_element.clone()) {
+                Ok(string) => { writeln!(f, "    {} {}", i, string)? }
+                Err(_) => { writeln!(f, "    {} 0x{}", i, hex::encode(path_element.as_slice()))? }
+            }
+        }
+        writeln!(f, "  }}")?;
+        writeln!(f, "{:?}", self.query)?;
+        write!(f, "}}")?;
+        Ok(())
+    }
+}
+
 // If a subquery exists :
 // limit should be applied to the elements returned by the subquery
 // offset should be applied to the first item that will subqueried (first in the
 // case of a range)
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SizedQuery {
     query: Query,
     limit: Option<u16>,
     offset: Option<u16>,
+}
+
+impl fmt::Debug for SizedQuery {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        writeln!(f, "  SizedQuery {{")?;
+        writeln!(f, "    Limit: {:?}", self.limit)?;
+        writeln!(f, "    Offset: {:?}", self.offset)?;
+        writeln!(f, "    Query {:#?}", self.query)?;
+        write!(f, "  }}")?;
+        Ok(())
+    }
 }
 
 impl SizedQuery {

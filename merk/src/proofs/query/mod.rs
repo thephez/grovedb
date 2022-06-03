@@ -1,15 +1,11 @@
 mod map;
 
-use std::{
-    cmp,
-    cmp::{max, min, Ordering},
-    collections::BTreeSet,
-    hash::Hash,
-    ops::{Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive},
-};
+use serde::{Serialize, Serializer};
+use std::{cmp, cmp::{max, min, Ordering}, collections::BTreeSet, fmt, hash::Hash, ops::{Range, RangeFrom, RangeFull, RangeInclusive, RangeTo, RangeToInclusive}};
 
 use anyhow::{bail, Result};
 use indexmap::IndexMap;
+use serde::ser::SerializeStruct;
 pub use map::*;
 use storage::RawIterator;
 #[cfg(feature = "full")]
@@ -18,7 +14,7 @@ use {super::Op, std::collections::LinkedList};
 use super::{tree::execute, Decoder, Node};
 use crate::tree::{Fetch, Hash as MerkHash, Link, RefWalker};
 
-#[derive(Debug, Default, Clone)]
+#[derive(Serialize, Debug, Default, Clone)]
 pub struct SubqueryBranch {
     pub subquery_key: Option<Vec<u8>>,
     pub subquery: Option<Box<Query>>,
@@ -26,13 +22,21 @@ pub struct SubqueryBranch {
 
 /// `Query` represents one or more keys or ranges of keys, which can be used to
 /// resolve a proof which will include all of the requested values.
-#[derive(Debug, Default, Clone)]
+#[derive(Serialize, Debug, Default, Clone)]
 pub struct Query {
     items: BTreeSet<QueryItem>,
     pub default_subquery_branch: SubqueryBranch,
+    #[serde(serialize_with = "indexmap::serde_seq::serialize")]
     pub conditional_subquery_branches: IndexMap<QueryItem, SubqueryBranch>,
     pub left_to_right: bool,
 }
+
+// impl fmt::Debug for Query {
+//     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+//         writeln!(f, "{:?}", serde_json::to_string_pretty(&self))?;
+//         Ok(())
+//     }
+// }
 
 type ProofAbsenceLimitOffset = (LinkedList<Op>, (bool, bool), Option<u16>, Option<u16>);
 
@@ -279,6 +283,53 @@ pub enum QueryItem {
     RangeAfter(RangeFrom<Vec<u8>>),
     RangeAfterTo(Range<Vec<u8>>),
     RangeAfterToInclusive(RangeInclusive<Vec<u8>>),
+}
+
+impl Serialize for QueryItem
+{
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("QueryItem", 2)?;
+        match self {
+            QueryItem::Key(key) => {
+                state.serialize_field("key", key)?;
+            }
+            QueryItem::Range(range) => {
+                state.serialize_field("startIncluded", &range.start)?;
+                state.serialize_field("endExcluded", &range.end)?;
+            }
+            QueryItem::RangeInclusive(range) => {
+                state.serialize_field("startIncluded", &range.start())?;
+                state.serialize_field("endIncluded", &range.end())?;
+            }
+            QueryItem::RangeFull(_) => {
+                state.serialize_field("allRange", "true")?;
+            }
+            QueryItem::RangeFrom(start) => {
+                state.serialize_field("fromIncluded", &start.start)?;
+            }
+            QueryItem::RangeTo(to) => {
+                state.serialize_field("toExcluded", &to.end)?;
+            }
+            QueryItem::RangeToInclusive(to) => {
+                state.serialize_field("toIncluded", &to.end)?;
+            }
+            QueryItem::RangeAfter(after) => {
+                state.serialize_field("fromExcluded", &after.start)?;
+            }
+            QueryItem::RangeAfterTo(range) => {
+                state.serialize_field("startExcluded", &range.start)?;
+                state.serialize_field("endExcluded", &range.end)?;
+            }
+            QueryItem::RangeAfterToInclusive(range) => {
+                state.serialize_field("startExcluded", &range.start())?;
+                state.serialize_field("endIncluded", &range.end())?;
+            }
+        }
+        state.end()
+    }
 }
 
 impl std::hash::Hash for QueryItem {
