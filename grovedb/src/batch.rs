@@ -6,11 +6,11 @@ use std::{
     collections::{BTreeMap, HashMap, HashSet},
     hash::Hash,
 };
+use std::collections::btree_map::Entry;
 
 use costs::{
     cost_return_on_error, cost_return_on_error_no_add, CostResult, CostsExt, OperationCost,
 };
-use indexmap::{map::Entry, IndexMap};
 use merk::Merk;
 use nohash_hasher::IntMap;
 use storage::{Storage, StorageBatch, StorageContext};
@@ -165,7 +165,7 @@ trait TreeCache {
     fn execute_ops_on_path(
         &mut self,
         path: &[Vec<u8>],
-        ops_at_path_by_key: IndexMap<Vec<u8>, Op>,
+        ops_at_path_by_key: BTreeMap<Vec<u8>, Op>,
         batch_apply_options: &BatchApplyOptions,
     ) -> CostResult<[u8; 32], Error>;
 }
@@ -189,7 +189,7 @@ where
     fn execute_ops_on_path(
         &mut self,
         path: &[Vec<u8>],
-        ops_at_path_by_key: IndexMap<Vec<u8>, Op>,
+        ops_at_path_by_key: BTreeMap<Vec<u8>, Op>,
         batch_apply_options: &BatchApplyOptions,
     ) -> CostResult<[u8; 32], Error> {
         let mut cost = OperationCost::default();
@@ -247,7 +247,7 @@ impl TreeCache for TreeCacheKnownPaths {
     fn execute_ops_on_path(
         &mut self,
         path: &[Vec<u8>],
-        ops_at_path_by_key: IndexMap<Vec<u8>, Op>,
+        ops_at_path_by_key: BTreeMap<Vec<u8>, Op>,
         _batch_apply_options: &BatchApplyOptions,
     ) -> CostResult<[u8; 32], Error> {
         let mut cost = OperationCost::default();
@@ -265,7 +265,7 @@ impl TreeCache for TreeCacheKnownPaths {
 }
 
 ///                          LEVEL           PATH                   KEY      OP
-type OpsByLevelPath = IntMap<usize, IndexMap<Vec<Vec<u8>>, IndexMap<Vec<u8>, Op>>>;
+type OpsByLevelPath = IntMap<usize, BTreeMap<Vec<Vec<u8>>, BTreeMap<Vec<u8>, Op>>>;
 
 struct BatchStructure<C> {
     /// Operations by level path
@@ -337,15 +337,15 @@ where
                 if let Some(ops_on_path) = ops_on_level.get_mut(op.path.as_slice()) {
                     ops_on_path.insert(op.key, op.op);
                 } else {
-                    let mut ops_on_path: IndexMap<Vec<u8>, Op> = IndexMap::new();
+                    let mut ops_on_path: BTreeMap<Vec<u8>, Op> = BTreeMap::new();
                     ops_on_path.insert(op.key, op.op);
                     ops_on_level.insert(op.path.clone(), ops_on_path);
                 }
             } else {
-                let mut ops_on_path: IndexMap<Vec<u8>, Op> = IndexMap::new();
+                let mut ops_on_path: BTreeMap<Vec<u8>, Op> = BTreeMap::new();
                 ops_on_path.insert(op.key, op.op);
-                let mut ops_on_level: IndexMap<Vec<Vec<u8>>, IndexMap<Vec<u8>, Op>> =
-                    IndexMap::new();
+                let mut ops_on_level: BTreeMap<Vec<Vec<u8>>, BTreeMap<Vec<u8>, Op>> =
+                    BTreeMap::new();
                 ops_on_level.insert(op.path, ops_on_path);
                 ops_by_level_path.insert(level, ops_on_level);
                 if current_last_level < level {
@@ -422,9 +422,9 @@ impl GroveDb {
                                 ops_by_level_path.get_mut(&(current_level - 1))
                             {
                                 if let Some(ops_on_path) = ops_at_level_above.get_mut(parent_path) {
-                                    match ops_on_path.entry(key.to_vec()) {
-                                        Entry::Vacant(vaccant_entry) => {
-                                            vaccant_entry
+                                    match ops_on_path.entry(key.clone()) {
+                                        Entry::Vacant(vacant_entry) => {
+                                            vacant_entry
                                                 .insert(Op::ReplaceTreeHash { hash: root_hash });
                                         }
                                         Entry::Occupied(occupied_entry) => {
@@ -453,7 +453,7 @@ impl GroveDb {
                                         }
                                     }
                                 } else {
-                                    let mut ops_on_path: IndexMap<Vec<u8>, Op> = IndexMap::new();
+                                    let mut ops_on_path: BTreeMap<Vec<u8>, Op> = BTreeMap::new();
                                     ops_on_path.insert(
                                         key.clone(),
                                         Op::ReplaceTreeHash { hash: root_hash },
@@ -461,13 +461,13 @@ impl GroveDb {
                                     ops_at_level_above.insert(parent_path.to_vec(), ops_on_path);
                                 }
                             } else {
-                                let mut ops_on_path: IndexMap<Vec<u8>, Op> = IndexMap::new();
+                                let mut ops_on_path: BTreeMap<Vec<u8>, Op> = BTreeMap::new();
                                 ops_on_path
                                     .insert(key.clone(), Op::ReplaceTreeHash { hash: root_hash });
-                                let mut ops_on_level: IndexMap<
+                                let mut ops_on_level: BTreeMap<
                                     Vec<Vec<u8>>,
-                                    IndexMap<Vec<u8>, Op>,
-                                > = IndexMap::new();
+                                    BTreeMap<Vec<u8>, Op>,
+                                > = BTreeMap::new();
                                 ops_on_level.insert(parent_path.to_vec(), ops_on_path);
                                 ops_by_level_path.insert(current_level - 1, ops_on_level);
                             }
